@@ -1,0 +1,19 @@
+SILENCE_START 2026-08-19T03:19:44Z uptime=347.70s boot=0ef8c587
+PHASE1_PASS 2026-08-19T03:48:40Z uptime=2083.21s boot=0ef8c587 靜默1680s 心跳連續 GAP=0
+PHASE1_VERDICT 容器A於03:53:14Z被回收(最後心跳),容器B於03:54:46Z啟動 boot=e549be98
+  - 有Monitor登記時: 28分鐘零通知存活 OK
+  - 無登記任務時: 閒置約4.5分鐘即回收
+  - nohup脫離程序不具續命效果; 磁碟保留, 程序全滅
+PHASE2_START 2026-08-19T03:56:33Z uptime=108.13s boot=e549be98 測試: background bash sleep 3600 能否撐60分鐘
+PHASE2_PASS 2026-08-19T04:57:21Z sleep3600完整跑完 exit=0, timeout參數(600000ms)未被強制執行
+  boot=e549be98 全程未變, uptime=3731s, 心跳361筆 GAP=0 最大delta=11s, 心跳程序存活
+  結論: registered background task 可零通知續命至少60分鐘
+PHASE3_START 2026-08-19T04:57:21Z uptime=3755.81s boot=e549be98 測試: 120分鐘 (容器累計將達3小時)
+PHASE3_ABORTED 容器B於05:01:17Z被回收(最後心跳), 距上一回合結束約3.5分鐘
+  重點: 當時 sleep 7200 的 registered background task 正在執行, 仍被殺 -> registered task 非保證
+  與PHASE2(同樣有registered task, 撐滿60分)行為不一致, 成因未知
+  容器C於05:08:48Z啟動 boot=f9ffcbb2; send_later於05:03排程, 05:09送達, 跨容器成功
+PHASE3_RETRY 2026-08-19T05:10:24Z uptime=96.10s boot=f9ffcbb2 乾淨2小時重測, 中途不檢查
+PHASE3_PASS 2026-08-19T07:11:19Z sleep7200完整跑完 exit=0
+  boot=f9ffcbb2 全程未變, uptime=7314s, 心跳721筆 GAP=0 最大delta=11s drift=0~1s
+  結論: registered background task 可零通知續命至少120分鐘
