@@ -17,3 +17,10 @@ PHASE3_RETRY 2026-08-19T05:10:24Z uptime=96.10s boot=f9ffcbb2 乾淨2小時重�
 PHASE3_PASS 2026-08-19T07:11:19Z sleep7200完整跑完 exit=0
   boot=f9ffcbb2 全程未變, uptime=7314s, 心跳721筆 GAP=0 最大delta=11s drift=0~1s
   結論: registered background task 可零通知續命至少120分鐘
+POSTHOC 2026-08-20T08:25:32Z 容器D boot=62993473
+  容器C: 05:08:48 誕生 -> 07:15:42 死亡, 壽命127分; 探針完成後無registered task, 約3-4.5分鐘內被回收
+  -> 第三個資料點, 確認閒置回收窗口穩定落在 3.5-5 分鐘
+  send_later 觸發準時度: +49s / +349s / +16s (伺服器端 last_fired_at)
+  但階段三的喚醒實際送達為隔日 08-20T08:23, 落後觸發約25小時
+  -> send_later 保證「最終送達」, 不保證「準時送達」; session 休眠時喚醒會積壓
+  scratchpad 檔案跨約25小時與4個容器實例完整倖存 (含 mtime)
