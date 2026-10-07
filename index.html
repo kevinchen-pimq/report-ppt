@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WebXR Saber</title>
+  <meta name="description" content="在瀏覽器中遊玩 Beat Saber 譜面的 WebXR 節奏遊戲" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect x=%224%22 y=%224%22 width=%2224%22 height=%2224%22 rx=%225%22 fill=%22%23c81e1e%22/%3E%3Cpath d=%22M9 12h14l-7 9z%22 fill=%22white%22/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/style.css" />
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three.module.min.js",
+        "three/addons/": "./vendor/addons/",
+        "fflate": "./vendor/fflate.module.min.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="scene"></div>
+
+  <main id="menu">
+    <header class="top">
+      <h1><span class="red">Web</span><span class="blue">XR</span> Saber</h1>
+      <p class="tag">讀取 Beat Saber 譜面（.zip / 資料夾 / BeatSaver），在 VR 中實際遊玩</p>
+    </header>
+
+    <div class="grid">
+      <section class="card" id="load-card">
+        <h2>1. 載入譜面</h2>
+        <label id="drop" class="drop">
+          <input id="file-zip" type="file" accept=".zip,application/zip" hidden />
+          <strong>拖放譜面 .zip 到這裡</strong>
+          <span>或點擊選擇檔案</span>
+        </label>
+        <div class="row">
+          <label class="btn ghost small">
+            <input id="file-folder" type="file" webkitdirectory multiple hidden />
+            選擇譜面資料夾
+          </label>
+        </div>
+
+        <h3>BeatSaver</h3>
+        <form id="id-form" class="row">
+          <input id="bsr" type="text" placeholder="輸入 BeatSaver ID（例如 25f）" autocomplete="off" />
+          <button class="btn small" type="submit">載入</button>
+        </form>
+        <form id="search-form" class="row">
+          <input id="search" type="search" placeholder="搜尋歌曲 / 譜師…" autocomplete="off" />
+          <button class="btn small" type="submit">搜尋</button>
+        </form>
+        <div class="row chips">
+          <button class="chip" data-sort="Rating" type="button">高評分</button>
+          <button class="chip" data-sort="Latest" type="button">最新</button>
+          <button class="chip" data-sort="Curated" type="button">精選</button>
+        </div>
+        <ul id="results" class="results"></ul>
+      </section>
+
+      <section class="card" id="song-card">
+        <h2>2. 選擇難度</h2>
+        <div id="song-empty" class="empty">尚未載入譜面</div>
+        <div id="song" hidden>
+          <div class="song-head">
+            <img id="cover" alt="" />
+            <div>
+              <div id="song-title" class="song-title"></div>
+              <div id="song-sub" class="muted"></div>
+              <div id="song-artist"></div>
+              <div id="song-meta" class="muted small-text"></div>
+            </div>
+          </div>
+          <div id="chars" class="row chips"></div>
+          <div id="diffs" class="diffs"></div>
+          <div id="diff-stats" class="muted small-text"></div>
+          <div class="play-row">
+            <button id="play-vr" class="btn big vr" disabled>▶ 進入 VR 遊玩</button>
+            <button id="play-desktop" class="btn big" disabled>▶ 桌面預覽</button>
+          </div>
+          <div id="vr-note" class="muted small-text"></div>
+        </div>
+      </section>
+
+      <section class="card" id="settings-card">
+        <h2>設定</h2>
+        <label class="check"><input type="checkbox" id="opt-nofail" /> 不會失敗 (No Fail)</label>
+        <label class="check"><input type="checkbox" id="opt-auto" /> 自動遊玩（觀賞模式）</label>
+        <label class="range">音訊延遲補償 <output id="out-offset">0 ms</output>
+          <input type="range" id="opt-offset" min="-200" max="200" step="5" value="0" /></label>
+        <label class="range">音樂音量 <output id="out-volume">80%</output>
+          <input type="range" id="opt-volume" min="0" max="1" step="0.05" value="0.8" /></label>
+        <label class="range">打擊音效 <output id="out-sfx">50%</output>
+          <input type="range" id="opt-sfx" min="0" max="1" step="0.05" value="0.5" /></label>
+        <label class="range">光劍角度 <output id="out-angle">0°</output>
+          <input type="range" id="opt-angle" min="-60" max="60" step="5" value="0" /></label>
+        <div class="row colors">
+          <label>左劍 <input type="color" id="opt-left" value="#c81e1e" /></label>
+          <label>右劍 <input type="color" id="opt-right" value="#2a8fe0" /></label>
+        </div>
+        <details class="help">
+          <summary>操作說明</summary>
+          <ul>
+            <li><b>VR</b>：左手紅劍、右手藍劍。依箭頭方向揮砍方塊，圓點方塊任意方向皆可。</li>
+            <li>躲開炸彈與紅色牆壁（頭部進入牆壁會扣血）。</li>
+            <li>扳機：開始 / 繼續 / 再玩一次。B / Y：暫停、回選單。A / X（暫停中）：重新開始。</li>
+            <li><b>桌面預覽</b>：滑鼠揮動藍劍，按住左鍵改控制紅劍；A/D 左右閃避、S 蹲下；空白鍵暫停。</li>
+          </ul>
+        </details>
+      </section>
+    </div>
+
+    <section id="last-result" class="card result" hidden></section>
+    <div id="status" class="status" role="status"></div>
+  </main>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
