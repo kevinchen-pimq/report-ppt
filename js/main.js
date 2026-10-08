@@ -1,4 +1,5 @@
 import { Game } from './game/Game.js';
+import { defaultSpectatorMode } from './game/Spectator.js';
 import { filesFromZip, filesFromFileList, parseInfo, coverUrl, DIFF_NAMES } from './mapLoader.js';
 import { parseDifficulty } from './beatmap.js';
 import { searchMaps, mapById, latestVersion, download } from './beatsaver.js';
@@ -10,6 +11,10 @@ const game = new Game($('scene'), {
   onExit: (results) => {
     menu.classList.remove('hidden');
     if (results) showResult(results);
+  },
+  onSpectatorMode: (mode) => {
+    $('opt-spectator').value = mode;
+    saveSettings(readSettings());
   },
 });
 
@@ -56,6 +61,7 @@ function readSettings() {
     saberAngle: Number($('opt-angle').value),
     leftColor: $('opt-left').value,
     rightColor: $('opt-right').value,
+    spectator: $('opt-spectator').value,
   };
 }
 
@@ -70,12 +76,13 @@ function syncSettingsUI() {
   const s = loadSettings();
   if (s.noFail !== undefined) $('opt-nofail').checked = s.noFail;
   if (s.autoplay !== undefined) $('opt-auto').checked = s.autoplay;
-  for (const [key, id] of [['offsetMs', 'opt-offset'], ['volume', 'opt-volume'], ['sfxVolume', 'opt-sfx'], ['saberAngle', 'opt-angle'], ['leftColor', 'opt-left'], ['rightColor', 'opt-right']]) {
+  for (const [key, id] of [['offsetMs', 'opt-offset'], ['volume', 'opt-volume'], ['sfxVolume', 'opt-sfx'], ['saberAngle', 'opt-angle'], ['leftColor', 'opt-left'], ['rightColor', 'opt-right'], ['spectator', 'opt-spectator']]) {
     if (s[key] !== undefined) $(id).value = s[key];
   }
+  if (s.spectator === undefined) $('opt-spectator').value = defaultSpectatorMode();
   syncSettingsUI();
   game.applySettings(readSettings());
-  for (const el of document.querySelectorAll('#settings-card input')) {
+  for (const el of document.querySelectorAll('#settings-card input, #settings-card select')) {
     el.addEventListener('input', () => {
       syncSettingsUI();
       const v = readSettings();

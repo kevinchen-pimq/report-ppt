@@ -182,3 +182,47 @@ html, body {
 }
 .status.show { display: block; }
 .status.error { border-color: var(--red); color: #ffb3bb; }
+
+#spectator { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+#spectator[hidden] { display: none; }
+#spectator-bar {
+  position: fixed;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: calc(100% - 32px);
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(10, 12, 28, 0.75);
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+#spectator-bar[hidden] { display: none; }
+#spectator-bar span { margin-right: 4px; }
+#spectator-bar .hint { color: var(--muted); font-size: 12px; }
+#spectator-bar button {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+}
+#spectator-bar button.active, #spectator-bar button:hover { border-color: var(--accent); background: rgba(124, 156, 255, 0.25); }
+.select { display: block; margin: 12px 0; }
+.select select {
+  width: 100%;
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 14px;
+}

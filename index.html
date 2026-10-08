@@ -94,6 +94,12 @@
           <input type="range" id="opt-sfx" min="0" max="1" step="0.05" value="0.5" /></label>
         <label class="range">光劍角度 <output id="out-angle">0°</output>
           <input type="range" id="opt-angle" min="-60" max="60" step="5" value="0" /></label>
+        <label class="select">VR 時電腦螢幕顯示
+          <select id="opt-spectator">
+            <option value="third">第三人稱視角</option>
+            <option value="first">第一人稱（平滑）</option>
+            <option value="off">關閉（一體機建議）</option>
+          </select></label>
         <div class="row colors">
           <label>左劍 <input type="color" id="opt-left" value="#c81e1e" /></label>
           <label>右劍 <input type="color" id="opt-right" value="#2a8fe0" /></label>
@@ -104,6 +110,7 @@
             <li><b>VR</b>：左手紅劍、右手藍劍。依箭頭方向揮砍方塊，圓點方塊任意方向皆可。</li>
             <li>躲開炸彈與紅色牆壁（頭部進入牆壁會扣血）。</li>
             <li>扳機：開始 / 繼續 / 再玩一次。B / Y：暫停、回選單。A / X（暫停中）：重新開始。</li>
+            <li><b>觀戰畫面</b>：用 PC VR 遊玩時，電腦螢幕會顯示第三人稱視角，按 V 或畫面上方按鈕切換。</li>
             <li><b>桌面預覽</b>：滑鼠揮動藍劍，按住左鍵改控制紅劍；A/D 左右閃避、S 蹲下；空白鍵暫停。</li>
           </ul>
         </details>

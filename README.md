@@ -24,6 +24,8 @@
   - 方塊被切成兩半的碎片、火花、控制器震動回饋、打擊音效
   - 依譜面燈光事件變化的雷射、光環、跑道燈
   - 結算畫面（等級 SS～E、百分比、最大連擊）
+- **觀戰畫面**：用 PC VR（Chrome / Edge + SteamVR / Link）遊玩時，電腦螢幕會顯示第三人稱視角（含玩家替身），
+  也可切換成平滑的第一人稱視角或關閉；按 V 或畫面上方的按鈕切換。Quest 等一體機預設關閉以節省效能
 - **桌面預覽**：沒有 VR 也能用滑鼠試玩，或開啟「自動遊玩」觀賞譜面
 
 ## 操作
@@ -71,6 +73,7 @@ js/game/Score.js        計分、連擊倍率、血量
 js/game/Environment.js  場景與燈光事件
 js/game/Hud.js          分數 / 連擊 / 血量面板與訊息看板
 js/game/Effects.js      切割碎片與火花
+js/game/Spectator.js    VR 時電腦螢幕上的第三人稱 / 第一人稱觀戰畫面
 js/game/Audio.js        音樂播放時鐘與打擊音效
 vendor/                 three.js、fflate（MIT，授權見 vendor/LICENSES.md）
 ```

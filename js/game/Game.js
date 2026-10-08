@@ -6,6 +6,7 @@ import { Hud } from './Hud.js';
 import { Saber } from './Saber.js';
 import { ScoreKeeper } from './Score.js';
 import { GameAudio } from './Audio.js';
+import { Spectator, defaultSpectatorMode } from './Spectator.js';
 import { COLOR_LEFT, COLOR_RIGHT, laneX, layerY, noteRotation, rotationToDir } from './constants.js';
 
 const LEAD_IN = 2.0; // seconds before the song starts
@@ -32,6 +33,7 @@ export class Game {
       sfxVolume: 0.5,
       leftColor: COLOR_LEFT,
       rightColor: COLOR_RIGHT,
+      spectator: defaultSpectatorMode(),
     };
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -76,6 +78,13 @@ export class Game {
     this.wallShade.renderOrder = 100;
     this.camera.add(this.wallShade);
 
+    // Third-person / smoothed view on the PC monitor while in VR
+    this.spectator = new Spectator(this.scene);
+    this.spectator.onModeChange = (mode) => {
+      this.settings.spectator = mode;
+      this.hooks.onSpectatorMode?.(mode);
+    };
+
     this.state = 'idle';
     this.mode = 'desktop';
     this.map = null;
@@ -101,6 +110,7 @@ export class Game {
     this.sabers[1].setColor(this.settings.rightColor);
     this.notes.setColors(this.settings.leftColor, this.settings.rightColor);
     this.env.setColors(this.settings.leftColor, this.settings.rightColor);
+    this.spectator.setMode(this.settings.spectator);
   }
 
   // ---------------------------------------------------------------------------
@@ -139,6 +149,7 @@ export class Game {
     });
     await this.renderer.xr.setSession(session);
     this.xrSession = session;
+    this.spectator.start();
     this.enterReady();
   }
 
@@ -157,6 +168,7 @@ export class Game {
 
   onSessionEnd() {
     this.xrSession = null;
+    this.spectator.stop();
     this.mode = 'desktop';
     this.resetDesktopCamera();
     if (this.state !== 'idle') this.exitToMenu();
@@ -542,6 +554,7 @@ export class Game {
     if (this.state !== 'idle') this.hud.update(this.score, 0, Math.max(0, t), this.audio.duration, dt);
     this.effects.update(dt);
     this.renderer.render(this.scene, this.camera);
+    if (xr) this.spectator.render(this.renderer.xr.getCamera(), this.sabers, [this.wallShade], dt);
   }
 
   onResize() {
