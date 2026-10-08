@@ -9,7 +9,7 @@ class LightGroup {
   constructor() {
     this.materials = [];
     this.color = new THREE.Color(0, 0, 0);
-    this.target = new THREE.Color(0, 0, 0);
+    this.key = 'R';
     this.intensity = 0;
     this.mode = 'off';
     this.modeTime = 0;
@@ -22,7 +22,14 @@ export class Environment {
     this.scene = scene;
     this.root = new THREE.Group();
     scene.add(this.root);
-    this.colors = { left: new THREE.Color(COLOR_LEFT), right: new THREE.Color(COLOR_RIGHT), white: new THREE.Color(0xffffff) };
+    this.colors = {
+      left: new THREE.Color(COLOR_LEFT),
+      right: new THREE.Color(COLOR_RIGHT),
+      leftBoost: new THREE.Color(COLOR_LEFT),
+      rightBoost: new THREE.Color(COLOR_RIGHT),
+      white: new THREE.Color(0xffffff),
+    };
+    this.boost = false;
     this.groups = Array.from({ length: GROUPS }, () => new LightGroup());
     this.laserSpeed = [0, 0];
     this.ringSpin = 0;
@@ -196,9 +203,18 @@ export class Environment {
     this.root.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8888aa, size: 0.6, fog: false })));
   }
 
-  setColors(left, right) {
+  setColors(left, right, leftBoost = left, rightBoost = right) {
     this.colors.left.set(left);
     this.colors.right.set(right);
+    this.colors.leftBoost.set(leftBoost ?? left);
+    this.colors.rightBoost.set(rightBoost ?? right);
+  }
+
+  /** 'L' | 'R' | 'W' -> current colour, honouring colour boost */
+  palette(key) {
+    if (key === 'L') return this.boost ? this.colors.leftBoost : this.colors.left;
+    if (key === 'R') return this.boost ? this.colors.rightBoost : this.colors.right;
+    return this.colors.white;
   }
 
   /** Default lighting when no events (menu / maps without lights). */
@@ -206,7 +222,7 @@ export class Environment {
     for (let g = 0; g < GROUPS; g++) {
       const grp = this.groups[g];
       grp.mode = 'on';
-      grp.target.copy(g % 2 ? this.colors.right : this.colors.left);
+      grp.key = g % 2 ? 'R' : 'L';
       grp.brightness = g === 4 ? 1 : 0.6;
     }
     this.laserSpeed = [1, 1];
@@ -217,15 +233,16 @@ export class Environment {
     this.eventIdx = 0;
     this.ringSpinVel = 0;
     this.ringZoomTarget = 1;
+    this.boost = false;
     if (!this.events.some((e) => e.type <= 4)) this.setIdle();
     else {
       for (const g of this.groups) {
         g.mode = 'off';
-        g.target.setRGB(0, 0, 0);
+        g.key = 'R';
       }
       // keep the runway edge lit so the track is readable
       this.groups[4].mode = 'on';
-      this.groups[4].target.copy(this.colors.right);
+      this.groups[4].key = 'R';
       this.groups[4].brightness = 0.6;
       this.laserSpeed = [0, 0];
     }
@@ -239,15 +256,15 @@ export class Environment {
         g.mode = 'off';
         return;
       }
-      let color;
-      if (v >= 1 && v <= 4) color = this.colors.right;
-      else if (v >= 5 && v <= 8) color = this.colors.left;
-      else color = this.colors.white;
+      if (v >= 1 && v <= 4) g.key = 'R';
+      else if (v >= 5 && v <= 8) g.key = 'L';
+      else g.key = 'W';
       const kind = ((v - 1) % 4) + 1; // 1 on, 2 flash, 3 fade, 4 transition
-      g.target.copy(color);
       g.brightness = e.f === undefined || e.f === null ? 1 : Math.max(0, Math.min(1.5, e.f));
       g.mode = kind === 2 ? 'flash' : kind === 3 ? 'fade' : 'on';
       g.modeTime = t;
+    } else if (e.type === 5) {
+      this.boost = e.value === 1;
     } else if (e.type === 8) {
       this.ringSpinVel += (Math.random() < 0.5 ? -1 : 1) * 2.5;
     } else if (e.type === 9) {
@@ -271,7 +288,7 @@ export class Environment {
       else if (g.mode === 'fade') k = Math.max(0, 1.4 - age * 1.0);
       const target = k * g.brightness;
       g.intensity += (target - g.intensity) * Math.min(1, dt * 25);
-      g.color.copy(g.target).multiplyScalar(g.intensity);
+      g.color.copy(this.palette(g.key)).multiplyScalar(g.intensity);
       for (const m of g.materials) m.color.copy(g.color);
     }
     // Lasers sweep

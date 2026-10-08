@@ -1,25 +1,26 @@
 import { Game } from './game/Game.js';
-import { defaultSpectatorMode } from './game/Spectator.js';
-import { filesFromZip, filesFromFileList, parseInfo, coverUrl, DIFF_NAMES } from './mapLoader.js';
-import { parseDifficulty } from './beatmap.js';
+import { settings } from './settings.js';
+import { Library, diffName, defaultSetIndex, mapStats } from './library.js';
 import { searchMaps, mapById, latestVersion, download } from './beatsaver.js';
+import { DIFF_NAMES } from './mapLoader.js';
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');
+const library = new Library();
 
 const game = new Game($('scene'), {
-  onExit: (results) => {
-    menu.classList.remove('hidden');
-    if (results) showResult(results);
-  },
-  onSpectatorMode: (mode) => {
-    $('opt-spectator').value = mode;
-    saveSettings(readSettings());
+  library,
+  hooks: {
+    onExit: (results) => {
+      menu.classList.remove('hidden');
+      if (results) showResult(results);
+      if (game.current) selectEntry(game.current.entry, game.current.setIdx, game.current.diffIdx);
+    },
+    onError: (e) => status(`載入失敗：${e.message}`, { error: true }),
   },
 });
 
-let current = null; // { files, info, coverImage, coverSrc }
-let selected = null; // { set, diff, map }
+let current = null; // { entry, setIdx, diffIdx, preview }
 
 // ---------------------------------------------------------------------------
 // Status line
@@ -34,102 +35,101 @@ function status(msg, { error = false, sticky = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// Settings (persisted per browser)
-const SETTINGS_KEY = 'webxr-saber-settings';
-function loadSettings() {
-  try {
-    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
-  } catch (e) {
-    return {};
+// Settings (shared with the in-VR menu through the settings store)
+const CHECKS = ['noFail', 'autoplay', 'useMapColors'];
+const RANGES_UI = {
+  playerHeight: (v) => `${Number(v).toFixed(2)} m`,
+  audioLatencyMs: (v) => `${v > 0 ? '+' : ''}${v} ms`,
+  volume: (v) => `${Math.round(v * 100)}%`,
+  sfxVolume: (v) => `${Math.round(v * 100)}%`,
+  saberAngle: (v) => `${v}°`,
+};
+
+function syncSettingsUI(v) {
+  for (const k of CHECKS) $(`opt-${k}`).checked = !!v[k];
+  for (const [k, fmt] of Object.entries(RANGES_UI)) {
+    $(`opt-${k}`).value = v[k];
+    $(`out-${k}`).textContent = fmt(v[k]);
   }
-}
-function saveSettings(s) {
-  try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
-  } catch (e) {
-    /* storage unavailable */
-  }
+  $('opt-spectator').value = v.spectator;
+  $('opt-leftColor').value = v.leftColor;
+  $('opt-rightColor').value = v.rightColor;
 }
 
-function readSettings() {
-  return {
-    noFail: $('opt-nofail').checked,
-    autoplay: $('opt-auto').checked,
-    offsetMs: Number($('opt-offset').value),
-    volume: Number($('opt-volume').value),
-    sfxVolume: Number($('opt-sfx').value),
-    saberAngle: Number($('opt-angle').value),
-    leftColor: $('opt-left').value,
-    rightColor: $('opt-right').value,
-    spectator: $('opt-spectator').value,
-  };
-}
+syncSettingsUI(settings.all);
+settings.subscribe((v) => syncSettingsUI(v));
+for (const k of CHECKS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.checked }));
+for (const k of Object.keys(RANGES_UI)) $(`opt-${k}`).addEventListener('input', (e) => settings.set({ [k]: Number(e.target.value) }));
+$('opt-spectator').addEventListener('change', (e) => settings.set({ spectator: e.target.value }));
+$('opt-leftColor').addEventListener('input', (e) => settings.set({ leftColor: e.target.value }));
+$('opt-rightColor').addEventListener('input', (e) => settings.set({ rightColor: e.target.value }));
 
-function syncSettingsUI() {
-  $('out-offset').textContent = `${$('opt-offset').value} ms`;
-  $('out-volume').textContent = `${Math.round($('opt-volume').value * 100)}%`;
-  $('out-sfx').textContent = `${Math.round($('opt-sfx').value * 100)}%`;
-  $('out-angle').textContent = `${$('opt-angle').value}°`;
+// ---------------------------------------------------------------------------
+// Audio latency calibration on the web page (the VR menu has its own)
+const cal = game.calibrator;
+function calInfo() {
+  const r = cal.result;
+  $('cal-info').textContent = cal.running
+    ? `已敲 ${cal.count} 次${r !== null ? ` · 測得 ${r > 0 ? '+' : ''}${r} ms` : '（至少 6 次）'}`
+    : '聽到「嗒」聲時敲擊，測出耳機 / 喇叭的額外延遲。正值 = 聲音比畫面晚。';
+  $('cal-apply').disabled = r === null;
+  $('cal-apply').textContent = r !== null ? `套用 ${r} ms` : '套用';
 }
-
-(function initSettings() {
-  const s = loadSettings();
-  if (s.noFail !== undefined) $('opt-nofail').checked = s.noFail;
-  if (s.autoplay !== undefined) $('opt-auto').checked = s.autoplay;
-  for (const [key, id] of [['offsetMs', 'opt-offset'], ['volume', 'opt-volume'], ['sfxVolume', 'opt-sfx'], ['saberAngle', 'opt-angle'], ['leftColor', 'opt-left'], ['rightColor', 'opt-right'], ['spectator', 'opt-spectator']]) {
-    if (s[key] !== undefined) $(id).value = s[key];
+function calFlash() {
+  if (!cal.running) {
+    $('cal-tap').classList.remove('flash');
+    return;
   }
-  if (s.spectator === undefined) $('opt-spectator').value = defaultSpectatorMode();
-  syncSettingsUI();
-  game.applySettings(readSettings());
-  for (const el of document.querySelectorAll('#settings-card input, #settings-card select')) {
-    el.addEventListener('input', () => {
-      syncSettingsUI();
-      const v = readSettings();
-      game.applySettings(v);
-      saveSettings(v);
-    });
+  $('cal-tap').classList.toggle('flash', cal.pulse() > 0.5);
+  requestAnimationFrame(calFlash);
+}
+$('cal-start').addEventListener('click', () => {
+  if (cal.running) cal.stop();
+  else {
+    cal.start(100);
+    calFlash();
   }
-})();
+  $('cal-start').textContent = cal.running ? '停止測試' : '開始節拍測試';
+  $('cal-tap').disabled = !cal.running;
+  calInfo();
+});
+$('cal-tap').addEventListener('pointerdown', (e) => {
+  cal.tap(e.timeStamp || performance.now());
+  calInfo();
+});
+window.addEventListener('keydown', (e) => {
+  if (e.key === ' ' && cal.running && !menu.classList.contains('hidden')) {
+    e.preventDefault();
+    cal.tap(performance.now());
+    calInfo();
+  }
+});
+$('cal-apply').addEventListener('click', () => {
+  if (cal.result !== null) settings.set({ audioLatencyMs: cal.result });
+  status(`已套用音訊延遲 ${settings.get('audioLatencyMs')} ms`);
+});
 
 // ---------------------------------------------------------------------------
 // Map loading
-async function loadFiles(files, label) {
+async function addAndSelect(promise, label) {
   try {
-    const info = parseInfo(files);
-    const src = coverUrl(files, info);
-    const coverImage = new Image();
-    if (src) coverImage.src = src;
-    if (current?.coverSrc) URL.revokeObjectURL(current.coverSrc);
-    current = { files, info, coverImage: src ? coverImage : null, coverSrc: src };
-    selected = null;
-    game.audio.buffer = null;
-    renderSong();
-    status(`正在解碼音樂…`, { sticky: true });
-    await game.loadSong(files.get(info.songFile));
-    status(`已載入：${info.title}${label ? `（${label}）` : ''}`);
-    $('play-vr').disabled = !vrSupported || !selected;
-    $('play-desktop').disabled = !selected;
+    const entry = await promise;
+    selectEntry(entry);
+    status(`已載入：${entry.info.title}${label ? `（${label}）` : ''}`);
+    return entry;
   } catch (e) {
     console.error(e);
     status(`載入失敗：${e.message}`, { error: true });
-  }
-}
-
-async function loadZipBuffer(buffer, label) {
-  status('正在解壓縮…', { sticky: true });
-  try {
-    const files = await filesFromZip(buffer);
-    await loadFiles(files, label);
-  } catch (e) {
-    console.error(e);
-    status(`載入失敗：${e.message}`, { error: true });
+    return null;
   }
 }
 
 $('file-zip').addEventListener('change', async (e) => {
   const f = e.target.files[0];
-  if (f) await loadZipBuffer(await f.arrayBuffer(), f.name);
+  if (f) {
+    status('正在解壓縮…', { sticky: true });
+    await addAndSelect(f.arrayBuffer().then((b) => library.addZip(b, f.name)), f.name);
+  }
   e.target.value = '';
 });
 
@@ -137,11 +137,8 @@ $('file-folder').addEventListener('change', async (e) => {
   const list = [...e.target.files];
   if (!list.length) return;
   status('正在讀取資料夾…', { sticky: true });
-  try {
-    await loadFiles(await filesFromFileList(list), list[0].webkitRelativePath.split('/')[0]);
-  } catch (err) {
-    status(`載入失敗：${err.message}`, { error: true });
-  }
+  const name = list[0].webkitRelativePath.split('/')[0];
+  await addAndSelect(library.addFileList(list, name), name);
   e.target.value = '';
 });
 
@@ -152,26 +149,56 @@ for (const ev of ['dragenter', 'dragover']) {
     drop.classList.add('over');
   });
 }
-for (const ev of ['dragleave', 'drop']) {
-  document.addEventListener(ev, () => drop.classList.remove('over'));
-}
+for (const ev of ['dragleave', 'drop']) document.addEventListener(ev, () => drop.classList.remove('over'));
 document.addEventListener('drop', async (e) => {
   e.preventDefault();
   const f = e.dataTransfer.files[0];
-  if (f) await loadZipBuffer(await f.arrayBuffer(), f.name);
+  if (f) {
+    status('正在解壓縮…', { sticky: true });
+    await addAndSelect(f.arrayBuffer().then((b) => library.addZip(b, f.name)), f.name);
+  }
 });
+
+// Library list
+library.subscribe(renderLibrary);
+function renderLibrary() {
+  const ul = $('library');
+  ul.innerHTML = '';
+  if (!library.entries.length) {
+    ul.innerHTML = '<li class="muted">尚無</li>';
+    return;
+  }
+  for (const e of library.entries) {
+    const li = document.createElement('li');
+    const img = document.createElement('img');
+    img.alt = '';
+    if (e.coverSrc) img.src = e.coverSrc;
+    const div = document.createElement('div');
+    const t = document.createElement('div');
+    t.className = 'r-title';
+    t.textContent = e.info.title;
+    const m = document.createElement('div');
+    m.className = 'r-meta';
+    m.textContent = `${e.info.artist} · ${e.info.mapper || '-'}`;
+    div.append(t, m);
+    li.append(img, div);
+    li.addEventListener('click', () => selectEntry(e));
+    ul.append(li);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // BeatSaver
-async function loadBeatSaverMap(map) {
-  const v = latestVersion(map);
-  if (!v) throw new Error('此譜面沒有可下載的版本');
-  status(`下載中：${map.name}…`, { sticky: true });
-  const buf = await download(v.downloadURL, (p) => status(`下載中：${map.name} ${Math.round(p * 100)}%`, { sticky: true }));
-  await loadZipBuffer(buf, `BeatSaver ${map.id}`);
+async function loadBeatSaverMap(doc) {
+  status(`下載中：${doc.name}…`, { sticky: true });
+  const entry = await addAndSelect(
+    library.addBeatSaver(doc, (p) => status(`下載中：${doc.name} ${Math.round(p * 100)}%`, { sticky: true })),
+    `BeatSaver ${doc.id}`,
+  );
+  if (!entry) return;
   try {
     const url = new URL(location.href);
-    url.searchParams.set('id', map.id);
+    url.searchParams.set('id', doc.id);
     history.replaceState(null, '', url);
   } catch (e) {
     /* ignore */
@@ -220,13 +247,7 @@ async function runSearch(query, sortOrder) {
       meta.textContent = `${m.metadata?.songAuthorName || ''} · ${m.metadata?.levelAuthorName || ''} · ${mins}:${secs} · ${diffs}`;
       div.append(title, meta);
       li.append(img, div);
-      li.addEventListener('click', async () => {
-        try {
-          await loadBeatSaverMap(m);
-        } catch (e) {
-          status(e.message, { error: true });
-        }
-      });
+      li.addEventListener('click', () => loadBeatSaverMap(m).catch((e) => status(e.message, { error: true })));
       list.append(li);
     }
   } catch (e) {
@@ -237,7 +258,7 @@ async function runSearch(query, sortOrder) {
 
 $('search-form').addEventListener('submit', (e) => {
   e.preventDefault();
-  for (const c of document.querySelectorAll('.chips .chip[data-sort]')) c.classList.remove('active');
+  for (const c of document.querySelectorAll('.chip[data-sort]')) c.classList.remove('active');
   runSearch($('search').value.trim(), 'Relevance');
 });
 for (const chip of document.querySelectorAll('.chip[data-sort]')) {
@@ -249,109 +270,101 @@ for (const chip of document.querySelectorAll('.chip[data-sort]')) {
 
 // ---------------------------------------------------------------------------
 // Song / difficulty selection
-let activeSet = 0;
-
-function renderSong() {
-  const { info, coverSrc } = current;
+function selectEntry(entry, setIdx, diffIdx) {
+  const info = entry.info;
+  current = { entry, setIdx: setIdx ?? defaultSetIndex(info), diffIdx: 0, preview: null };
+  current.diffIdx = diffIdx ?? info.sets[current.setIdx].diffs.length - 1;
   $('song-empty').hidden = true;
   $('song').hidden = false;
-  $('cover').src = coverSrc || '';
+  $('cover').src = entry.coverSrc || '';
   $('song-title').textContent = info.title;
   $('song-sub').textContent = info.subTitle;
   $('song-artist').textContent = info.artist;
   $('song-meta').textContent = `譜師 ${info.mapper || '-'} · BPM ${Math.round(info.bpm * 100) / 100} · 格式 v${info.version}`;
-  activeSet = Math.max(0, info.sets.findIndex((s) => s.characteristic === 'Standard'));
   renderSets();
 }
 
 function renderSets() {
-  const { info } = current;
+  const { entry } = current;
+  const info = entry.info;
   const chars = $('chars');
   chars.innerHTML = '';
   info.sets.forEach((set, i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = `chip${i === activeSet ? ' active' : ''}`;
+    b.className = `chip${i === current.setIdx ? ' active' : ''}`;
     b.textContent = set.characteristic;
     b.addEventListener('click', () => {
-      activeSet = i;
+      current.setIdx = i;
+      current.diffIdx = info.sets[i].diffs.length - 1;
       renderSets();
     });
     chars.append(b);
   });
-  const set = info.sets[activeSet];
   const diffs = $('diffs');
   diffs.innerHTML = '';
-  for (const d of set.diffs) {
+  info.sets[current.setIdx].diffs.forEach((d, i) => {
     const b = document.createElement('button');
     b.type = 'button';
-    b.className = 'diff';
+    b.className = `diff${i === current.diffIdx ? ' active' : ''}`;
     b.dataset.d = d.difficulty;
-    b.textContent = d.label || DIFF_NAMES[d.difficulty] || d.difficulty;
-    b.addEventListener('click', () => selectDiff(set, d, b));
+    b.textContent = diffName(d);
+    b.addEventListener('click', () => {
+      current.diffIdx = i;
+      renderSets();
+    });
     diffs.append(b);
-  }
-  // auto-select the hardest difficulty
-  const last = diffs.lastElementChild;
-  if (last) last.click();
+  });
+  previewDiff();
 }
 
-function selectDiff(set, diff, button) {
+function previewDiff() {
   try {
-    const { files, info } = current;
-    const json = files.json(diff.file);
-    const audioData = info.audioDataFile ? files.json(info.audioDataFile) : null;
-    const lightshow = diff.lightshowFile ? files.json(diff.lightshowFile) : null;
-    const map = parseDifficulty(json, { info, diff, audioData, lightshow });
-    selected = { set, diff, map };
-    for (const b of $('diffs').children) b.classList.toggle('active', b === button);
-    const nps = map.lastTime > 0 ? (map.colorNotes / map.lastTime).toFixed(2) : '0';
-    const bombs = map.notes.filter((n) => n.kind === 'bomb').length;
-    let text = `方塊 ${map.colorNotes} · 鏈 ${map.links} · 炸彈 ${bombs} · 牆 ${map.walls.length} · NJS ${map.njs} · NPS ${nps} · 譜面格式 v${map.version}`;
-    if (/360|90/.test(set.characteristic)) text += ' · ⚠ 旋轉模式的旋轉事件會被忽略';
+    const p = library.loadDifficulty(current.entry, current.setIdx, current.diffIdx);
+    current.preview = p;
+    const m = p.map;
+    const st = mapStats(m);
+    let text = `方塊 ${m.colorNotes} · 鏈 ${m.links} · 弧線 ${m.arcs.length} · 炸彈 ${st.bombs} · 牆 ${m.walls.length} · NJS ${m.njs} · NPS ${st.nps} · 譜面格式 v${m.version}`;
+    if (m.njsEvents) text += ` · NJS 變速事件 ${m.njsEvents}`;
+    if (p.meta.colors) text += ' · 有自訂顏色';
+    if (/360|90/.test(p.set.characteristic)) text += ' · ⚠ 旋轉模式的旋轉事件會被忽略';
     $('diff-stats').textContent = text;
-    $('play-vr').disabled = !vrSupported || !game.audio.buffer;
-    $('play-desktop').disabled = !game.audio.buffer;
   } catch (e) {
     console.error(e);
-    selected = null;
-    status(`難度解析失敗：${e.message}`, { error: true });
+    current.preview = null;
+    $('diff-stats').textContent = `難度解析失敗：${e.message}`;
   }
+  updateButtons();
 }
 
-function currentMeta() {
-  const { info, coverImage } = current;
-  return {
-    title: info.title,
-    subTitle: info.subTitle,
-    artist: info.artist,
-    mapper: info.mapper,
-    characteristic: selected.set.characteristic,
-    difficultyName: selected.diff.label || DIFF_NAMES[selected.diff.difficulty] || selected.diff.difficulty,
-    coverImage: coverImage && coverImage.complete && coverImage.naturalWidth ? coverImage : null,
-  };
+function updateButtons() {
+  const ok = !!current?.preview;
+  $('play-vr').disabled = !vrSupported || !ok;
+  $('play-desktop').disabled = !ok;
+  $('vr-menu').disabled = !vrSupported;
 }
 
-$('play-vr').addEventListener('click', async () => {
-  if (!selected) return;
-  game.applySettings(readSettings());
-  game.setMap(selected.map, currentMeta());
+async function enterVR(pending) {
   try {
     menu.classList.add('hidden');
-    await game.startVR();
+    await game.startVR(pending);
   } catch (e) {
     console.error(e);
     menu.classList.remove('hidden');
     status(`無法進入 VR：${e.message}`, { error: true });
   }
+}
+
+$('play-vr').addEventListener('click', () => {
+  if (current?.preview) enterVR({ entry: current.entry, setIdx: current.setIdx, diffIdx: current.diffIdx });
 });
+$('vr-menu').addEventListener('click', () => enterVR(null));
 
 $('play-desktop').addEventListener('click', () => {
-  if (!selected) return;
-  game.applySettings(readSettings());
-  game.setMap(selected.map, currentMeta());
+  if (!current?.preview) return;
+  if (cal.running) $('cal-start').click();
   menu.classList.add('hidden');
-  game.startDesktop();
+  game.startDesktop(current.entry, current.setIdx, current.diffIdx);
 });
 
 function showResult(r) {
@@ -365,7 +378,9 @@ function showResult(r) {
   rank.textContent = `${r.rank}  ${r.percent.toFixed(2)}%`;
   const stats = document.createElement('div');
   stats.className = 'stats';
-  for (const s of [`分數 ${r.score.toLocaleString('en-US')}`, `最大連擊 ${r.maxCombo}`, `命中 ${r.hits}`, `Miss ${r.misses}`, `壞切 ${r.badCuts}`, `炸彈 ${r.bombHits}`]) {
+  const items = [`分數 ${r.score.toLocaleString('en-US')}`, `最大連擊 ${r.maxCombo}`, `命中 ${r.hits}`, `Miss ${r.misses}`, `壞切 ${r.badCuts}`, `炸彈 ${r.bombHits}`];
+  if (r.best) items.push(r.best.isNew ? '新紀錄！' : `最佳 ${r.best.score.toLocaleString('en-US')}`);
+  for (const s of items) {
     const span = document.createElement('span');
     span.textContent = s;
     stats.append(span);
@@ -387,8 +402,10 @@ let vrSupported = false;
   } catch (e) {
     vrSupported = false;
   }
-  note.textContent = vrSupported ? '已偵測到 VR 裝置，按「進入 VR 遊玩」開始。' : '找不到 VR 裝置（需要 HTTPS 與支援 WebXR 的頭戴裝置）。仍可使用桌面預覽。';
-  if (selected && game.audio.buffer) $('play-vr').disabled = !vrSupported;
+  note.textContent = vrSupported
+    ? '已偵測到 VR 裝置。可以先在這裡選歌，或直接進入 VR 選單選歌。'
+    : '找不到 VR 裝置（需要 HTTPS 與支援 WebXR 的頭戴裝置）。仍可使用桌面預覽。';
+  updateButtons();
 })();
 
 // ---------------------------------------------------------------------------
@@ -401,14 +418,15 @@ if (params.get('id')) {
   (async () => {
     try {
       status('下載譜面…', { sticky: true });
-      await loadZipBuffer(await download(params.get('url'), (p) => status(`下載中 ${Math.round(p * 100)}%`, { sticky: true })), 'URL');
+      const buf = await download(params.get('url'), (p) => status(`下載中 ${Math.round(p * 100)}%`, { sticky: true }));
+      await addAndSelect(library.addZip(buf, 'URL'), 'URL');
     } catch (e) {
       status(e.message, { error: true });
     }
   })();
-} else {
-  runSearch('', 'Rating');
-  document.querySelector('.chip[data-sort="Rating"]').classList.add('active');
 }
+runSearch('', 'Rating');
+document.querySelector('.chip[data-sort="Rating"]').classList.add('active');
 
 window.__game = game;
+window.__library = library;

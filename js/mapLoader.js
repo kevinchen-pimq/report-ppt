@@ -77,6 +77,8 @@ export function parseInfo(files) {
         njs: d.noteJumpMovementSpeed || 0,
         offset: d.noteJumpStartBeatOffset || 0,
         mappers: d.beatmapAuthors?.mappers || [],
+        colorSchemeIdx: d.beatmapColorSchemeIdx ?? -1,
+        customColors: customColorsV2(d.customData),
       });
     }
     const mappers = new Set();
@@ -92,6 +94,7 @@ export function parseInfo(files) {
       audioDataFile: audio.audioDataFilename || null,
       coverFile: raw.coverImageFilename,
       previewStart: audio.previewStartTime || 0,
+      colorSchemes: (raw.colorSchemes || []).map(schemeV4),
       sets: [...sets.entries()].map(([characteristic, diffs]) => ({ characteristic, diffs })),
     };
   } else {
@@ -106,6 +109,7 @@ export function parseInfo(files) {
       audioDataFile: null,
       coverFile: raw._coverImageFilename,
       previewStart: raw._previewStartTime || 0,
+      colorSchemes: (raw._colorSchemes || []).map(schemeV2),
       sets: (raw._difficultyBeatmapSets || []).map((set) => ({
         characteristic: set._beatmapCharacteristicName || 'Standard',
         diffs: (set._difficultyBeatmaps || []).map((d) => ({
@@ -115,6 +119,8 @@ export function parseInfo(files) {
           lightshowFile: null,
           njs: d._noteJumpMovementSpeed || 0,
           offset: d._noteJumpStartBeatOffset || 0,
+          colorSchemeIdx: d._beatmapColorSchemeIdx ?? -1,
+          customColors: customColorsV2(d._customData),
         })),
       })),
     };
@@ -144,3 +150,85 @@ export const DIFF_NAMES = {
   Expert: 'Expert',
   ExpertPlus: 'Expert+',
 };
+
+// ---------------------------------------------------------------------------
+// Custom colours
+
+function clamp01(v) {
+  return Math.max(0, Math.min(1, Number(v) || 0));
+}
+
+/** {r,g,b} (0..1, possibly HDR) or "RRGGBB[AA]" -> 0xRRGGBB, or null */
+export function toHex(c) {
+  if (c == null) return null;
+  if (typeof c === 'string') {
+    const m = c.replace('#', '').match(/^[0-9a-f]{6}/i);
+    return m ? parseInt(m[0], 16) : null;
+  }
+  if (typeof c === 'object' && 'r' in c) {
+    return (Math.round(clamp01(c.r) * 255) << 16) | (Math.round(clamp01(c.g) * 255) << 8) | Math.round(clamp01(c.b) * 255);
+  }
+  return null;
+}
+
+function schemeV2(entry) {
+  const c = entry?.colorScheme || entry || {};
+  const use = entry?.useOverride !== false;
+  return {
+    notes: use,
+    lights: use,
+    left: toHex(c.saberAColor),
+    right: toHex(c.saberBColor),
+    envLeft: toHex(c.environmentColor0),
+    envRight: toHex(c.environmentColor1),
+    envLeftBoost: toHex(c.environmentColor0Boost),
+    envRightBoost: toHex(c.environmentColor1Boost),
+    obstacle: toHex(c.obstaclesColor),
+  };
+}
+
+function schemeV4(c) {
+  const legacy = c.useOverride;
+  return {
+    notes: c.overrideNotes ?? legacy ?? true,
+    lights: c.overrideLights ?? legacy ?? true,
+    left: toHex(c.saberAColor),
+    right: toHex(c.saberBColor),
+    envLeft: toHex(c.environmentColor0),
+    envRight: toHex(c.environmentColor1),
+    envLeftBoost: toHex(c.environmentColor0Boost),
+    envRightBoost: toHex(c.environmentColor1Boost),
+    obstacle: toHex(c.obstaclesColor),
+  };
+}
+
+// Per-difficulty colours from customData (SongCore / Chroma convention)
+function customColorsV2(cd) {
+  if (!cd) return null;
+  const pick = (...keys) => {
+    for (const k of keys) if (cd[k] != null) return toHex(cd[k]);
+    return null;
+  };
+  const out = {
+    left: pick('_colorLeft', 'colorLeft'),
+    right: pick('_colorRight', 'colorRight'),
+    envLeft: pick('_envColorLeft', 'envColorLeft'),
+    envRight: pick('_envColorRight', 'envColorRight'),
+    envLeftBoost: pick('_envColorLeftBoost', 'envColorLeftBoost'),
+    envRightBoost: pick('_envColorRightBoost', 'envColorRightBoost'),
+    obstacle: pick('_obstacleColor', 'obstacleColor'),
+  };
+  return Object.values(out).some((v) => v != null) ? out : null;
+}
+
+/** Map-defined colours for a difficulty: { left, right, envLeft, envRight, envLeftBoost, envRightBoost, obstacle } (null = default). */
+export function resolveColors(info, diff) {
+  const out = { left: null, right: null, envLeft: null, envRight: null, envLeftBoost: null, envRightBoost: null, obstacle: null };
+  const sc = info.colorSchemes?.[diff.colorSchemeIdx];
+  if (sc) {
+    if (sc.notes) Object.assign(out, { left: sc.left, right: sc.right, obstacle: sc.obstacle });
+    if (sc.lights) Object.assign(out, { envLeft: sc.envLeft, envRight: sc.envRight, envLeftBoost: sc.envLeftBoost, envRightBoost: sc.envRightBoost });
+  }
+  if (diff.customColors) for (const [k, v] of Object.entries(diff.customColors)) if (v != null) out[k] = v;
+  return Object.values(out).some((v) => v != null) ? out : null;
+}

@@ -86,7 +86,7 @@ function detectVersion(json) {
 export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
   const version = detectVersion(json);
   const bpm = info.bpm;
-  const raw = { notes: [], bombs: [], walls: [], chains: [], events: [], bpmChanges: [] };
+  const raw = { notes: [], bombs: [], walls: [], chains: [], arcs: [], events: [], bpmChanges: [], njs: [] };
 
   if (version === 2) {
     for (const n of json._notes || []) {
@@ -119,6 +119,13 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
       if (e._type === 100) raw.bpmChanges.push({ beat: e._time, bpm: e._floatValue });
       else raw.events.push({ beat: e._time, type: e._type, value: e._value, f: e._floatValue ?? 1 });
     }
+    for (const a of json._sliders || []) {
+      raw.arcs.push({
+        beat: a._headTime, c: a._colorType ?? 0, x: a._headLineIndex ?? 0, y: a._headLineLayer ?? 0, d: a._headCutDirection ?? 8,
+        mu: a._headControlPointLengthMultiplier ?? 1, tb: a._tailTime, tx: a._tailLineIndex ?? 0, ty: a._tailLineLayer ?? 0,
+        tc: a._tailCutDirection ?? 8, tmu: a._tailControlPointLengthMultiplier ?? 1, m: a._sliderMidAnchorMode ?? 0,
+      });
+    }
     const cd = json._customData || json.customData || {};
     for (const c of cd._BPMChanges || cd._bpmChanges || []) {
       raw.bpmChanges.push({ beat: c._time ?? c.b, bpm: c._BPM ?? c._bpm ?? c.m });
@@ -130,7 +137,11 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
     for (const s of json.burstSliders || []) {
       raw.chains.push({ beat: s.b, x: s.x ?? 0, y: s.y ?? 0, c: s.c ?? 0, d: s.d ?? 0, tb: s.tb, tx: s.tx ?? 0, ty: s.ty ?? 0, sc: s.sc ?? 3, s: s.s ?? 1 });
     }
+    for (const a of json.sliders || []) {
+      raw.arcs.push({ beat: a.b, c: a.c ?? 0, x: a.x ?? 0, y: a.y ?? 0, d: a.d ?? 8, mu: a.mu ?? 1, tb: a.tb, tx: a.tx ?? 0, ty: a.ty ?? 0, tc: a.tc ?? 8, tmu: a.tmu ?? 1, m: a.m ?? 0 });
+    }
     for (const e of json.basicBeatmapEvents || []) raw.events.push({ beat: e.b, type: e.et, value: e.i, f: e.f ?? 1 });
+    for (const e of json.colorBoostBeatmapEvents || []) raw.events.push({ beat: e.b, type: 5, value: e.o ? 1 : 0, f: 1 });
     for (const e of json.bpmEvents || []) raw.bpmChanges.push({ beat: e.b, bpm: e.m });
   } else {
     const cnd = json.colorNotesData || [];
@@ -154,7 +165,27 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
       const cd = chd[ch.ci ?? 0] || {};
       raw.chains.push({ beat: ch.hb, x: head.x ?? 0, y: head.y ?? 0, c: head.c ?? 0, d: head.d ?? 0, tb: ch.tb, tx: cd.tx ?? 0, ty: cd.ty ?? 0, sc: cd.c ?? 3, s: cd.s ?? 1 });
     }
+    const ad = json.arcsData || [];
+    for (const a of json.arcs || []) {
+      const head = cnd[a.hi ?? 0] || {};
+      const tail = cnd[a.ti ?? 0] || {};
+      const d = ad[a.ai ?? 0] || {};
+      raw.arcs.push({
+        beat: a.hb, c: head.c ?? 0, x: head.x ?? 0, y: head.y ?? 0, d: head.d ?? 8, mu: d.m ?? 1,
+        tb: a.tb, tx: tail.x ?? 0, ty: tail.y ?? 0, tc: tail.d ?? 8, tmu: d.tm ?? 1, m: d.a ?? 0,
+      });
+    }
+    const nd = json.njsEventData || [];
+    for (const e of json.njsEvents || []) {
+      const d = nd[e.i ?? 0] || {};
+      raw.njs.push({ beat: e.b, delta: d.d ?? 0, usePrevious: !!d.p, easing: d.e ?? 0 });
+    }
     if (lightshow) {
+      const cbd = lightshow.colorBoostEventsData || [];
+      for (const e of lightshow.colorBoostEvents || []) {
+        const d = cbd[e.i ?? 0] || {};
+        raw.events.push({ beat: e.b, type: 5, value: d.b ? 1 : 0, f: 1 });
+      }
       const bed = lightshow.basicEventsData || [];
       for (const e of lightshow.basicEvents || []) {
         const d = bed[e.i ?? 0] || {};
@@ -203,11 +234,23 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
     .map((e) => ({ time: toTime(e.beat), type: e.type, value: e.value, f: e.f }))
     .sort((a, b) => a.time - b.time);
 
+  const arcs = raw.arcs
+    .filter((a) => Number.isFinite(a.beat) && Number.isFinite(a.tb) && a.tb > a.beat)
+    .map((a) => buildArc(a, toTime))
+    .sort((a, b) => a.time - b.time);
+
+  const njsAt = makeNjsCurve(njs, raw.njs, toTime);
+
   const colorNotes = notes.filter((n) => n.kind === 'note').length;
   const links = notes.filter((n) => n.kind === 'link').length;
-  const lastTime = Math.max(0, ...notes.map((n) => n.time), ...walls.map((w) => w.endTime));
+  let lastTime = 0;
+  for (const n of notes) lastTime = Math.max(lastTime, n.time);
+  for (const w of walls) lastTime = Math.max(lastTime, w.endTime);
 
-  return { version, njs, halfJump, notes, walls, events, colorNotes, links, lastTime, maxScore: computeMaxScore(notes) };
+  return {
+    version, njs, halfJump, notes, walls, arcs, events, colorNotes, links, lastTime,
+    njsEvents: raw.njs.length, njsAt, maxScore: computeMaxScore(notes),
+  };
 }
 
 // Expands a chain (burst slider) into link pieces following the game's quadratic curve
@@ -256,3 +299,117 @@ export function computeMaxScore(notes) {
 }
 
 export { DIR_VEC };
+
+// ---------------------------------------------------------------------------
+// Arcs (sliders): cubic bezier from head to tail, sampled with per-sample times
+
+const ARC_SAMPLES = 28;
+
+function dirVec(d) {
+  const v = DIR_VEC[d];
+  if (!v) return [0, 0];
+  const l = Math.hypot(v[0], v[1]);
+  return [v[0] / l, v[1] / l];
+}
+
+function buildArc(a, toTime) {
+  // positions in lane units: x lane (0.6 m), y layer (0.5 m); convert to "metres-ish" for directions
+  const hx = a.x * 0.6;
+  const hy = a.y * 0.5;
+  const tx = a.tx * 0.6;
+  const ty = a.ty * 0.5;
+  const hd = dirVec(a.d);
+  const td = dirVec(a.tc);
+  const len = 0.6 + 0.25 * Math.hypot(tx - hx, ty - hy);
+  const p1x = hx + hd[0] * a.mu * len;
+  const p1y = hy + hd[1] * a.mu * len;
+  const p2x = tx - td[0] * a.tmu * len;
+  const p2y = ty - td[1] * a.tmu * len;
+  const samples = [];
+  for (let i = 0; i <= ARC_SAMPLES; i++) {
+    const u = i / ARC_SAMPLES;
+    const v = 1 - u;
+    const b0 = v * v * v;
+    const b1 = 3 * v * v * u;
+    const b2 = 3 * v * u * u;
+    const b3 = u * u * u;
+    const mx = b0 * hx + b1 * p1x + b2 * p2x + b3 * tx;
+    const my = b0 * hy + b1 * p1y + b2 * p2y + b3 * ty;
+    // back to lane / layer units so the game can apply its lane mapping
+    samples.push({ x: mx / 0.6, y: my / 0.5, time: toTime(a.beat + (a.tb - a.beat) * u) });
+  }
+  return { time: samples[0].time, endTime: samples[samples.length - 1].time, color: a.c === 1 ? 1 : 0, samples };
+}
+
+// ---------------------------------------------------------------------------
+// NJS events (v4): NJS = base + delta, eased from the previous event
+
+const EASINGS = [
+  (t) => t, // 0 linear
+  (t) => 1 - Math.cos((t * Math.PI) / 2), // InSine
+  (t) => Math.sin((t * Math.PI) / 2), // OutSine
+  (t) => -(Math.cos(Math.PI * t) - 1) / 2, // InOutSine
+  (t) => t * t, // InQuad
+  (t) => 1 - (1 - t) * (1 - t), // OutQuad
+  (t) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2), // InOutQuad
+  (t) => t ** 3, // InCubic
+  (t) => 1 - (1 - t) ** 3, // OutCubic
+  (t) => (t < 0.5 ? 4 * t ** 3 : 1 - (-2 * t + 2) ** 3 / 2), // InOutCubic
+  (t) => t ** 4, // InQuart
+  (t) => 1 - (1 - t) ** 4, // OutQuart
+  (t) => (t < 0.5 ? 8 * t ** 4 : 1 - (-2 * t + 2) ** 4 / 2), // InOutQuart
+  (t) => t ** 5, // InQuint
+  (t) => 1 - (1 - t) ** 5, // OutQuint
+  (t) => (t < 0.5 ? 16 * t ** 5 : 1 - (-2 * t + 2) ** 5 / 2), // InOutQuint
+  (t) => (t === 0 ? 0 : 2 ** (10 * t - 10)), // InExpo
+  (t) => (t === 1 ? 1 : 1 - 2 ** (-10 * t)), // OutExpo
+  (t) => (t === 0 ? 0 : t === 1 ? 1 : t < 0.5 ? 2 ** (20 * t - 10) / 2 : (2 - 2 ** (-20 * t + 10)) / 2), // InOutExpo
+  (t) => 1 - Math.sqrt(1 - t * t), // InCirc
+  (t) => Math.sqrt(1 - (t - 1) ** 2), // OutCirc
+  (t) => (t < 0.5 ? (1 - Math.sqrt(1 - (2 * t) ** 2)) / 2 : (Math.sqrt(1 - (-2 * t + 2) ** 2) + 1) / 2), // InOutCirc
+];
+
+export function ease(type, t) {
+  if (type === -1) return t >= 1 ? 1 : 0; // "none": jump at the event
+  const f = EASINGS[type] || EASINGS[0];
+  return f(Math.max(0, Math.min(1, t)));
+}
+
+/** Returns njsAt(seconds) for a map; constant when there are no NJS events. */
+export function makeNjsCurve(base, events, toTime) {
+  if (!events.length) return () => base;
+  const list = events
+    .filter((e) => Number.isFinite(e.beat))
+    .sort((a, b) => a.beat - b.beat)
+    .map((e) => ({ time: toTime(e.beat), delta: e.delta, usePrevious: e.usePrevious, easing: e.easing }));
+  let prev = base;
+  for (const e of list) {
+    e.value = Math.max(1, e.usePrevious ? prev : base + e.delta);
+    prev = e.value;
+  }
+  return (t) => {
+    if (t < list[0].time) {
+      const first = list[0];
+      // ease from the base speed into the first event
+      if (first.easing === -1 || first.time <= 0) return base;
+      return base + (first.value - base) * ease(first.easing, t / first.time);
+    }
+    let k = 0;
+    // binary search for the last event at or before t
+    let lo = 0;
+    let hi = list.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (list[mid].time <= t) {
+        k = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    const cur = list[k];
+    const next = list[k + 1];
+    if (!next || next.easing === -1 || next.usePrevious) return cur.value;
+    const span = next.time - cur.time;
+    if (span <= 0) return next.value;
+    return cur.value + (next.value - cur.value) * ease(next.easing, (t - cur.time) / span);
+  };
+}

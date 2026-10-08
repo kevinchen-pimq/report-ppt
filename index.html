@@ -56,6 +56,8 @@
           <button class="chip" data-sort="Curated" type="button">精選</button>
         </div>
         <ul id="results" class="results"></ul>
+        <h3>已載入的歌曲</h3>
+        <ul id="library" class="results small"><li class="muted">尚無</li></ul>
       </section>
 
       <section class="card" id="song-card">
@@ -78,22 +80,34 @@
             <button id="play-vr" class="btn big vr" disabled>▶ 進入 VR 遊玩</button>
             <button id="play-desktop" class="btn big" disabled>▶ 桌面預覽</button>
           </div>
-          <div id="vr-note" class="muted small-text"></div>
         </div>
+        <button id="vr-menu" class="btn vr-menu" disabled>進入 VR 選單（在 VR 中選歌 / 設定 / 校正）</button>
+        <div id="vr-note" class="muted small-text"></div>
       </section>
 
       <section class="card" id="settings-card">
         <h2>設定</h2>
-        <label class="check"><input type="checkbox" id="opt-nofail" /> 不會失敗 (No Fail)</label>
-        <label class="check"><input type="checkbox" id="opt-auto" /> 自動遊玩（觀賞模式）</label>
-        <label class="range">音訊延遲補償 <output id="out-offset">0 ms</output>
-          <input type="range" id="opt-offset" min="-200" max="200" step="5" value="0" /></label>
-        <label class="range">音樂音量 <output id="out-volume">80%</output>
-          <input type="range" id="opt-volume" min="0" max="1" step="0.05" value="0.8" /></label>
-        <label class="range">打擊音效 <output id="out-sfx">50%</output>
-          <input type="range" id="opt-sfx" min="0" max="1" step="0.05" value="0.5" /></label>
-        <label class="range">光劍角度 <output id="out-angle">0°</output>
-          <input type="range" id="opt-angle" min="-60" max="60" step="5" value="0" /></label>
+        <label class="check"><input type="checkbox" id="opt-noFail" /> 不會失敗 (No Fail)</label>
+        <label class="check"><input type="checkbox" id="opt-autoplay" /> 自動遊玩（觀賞模式）</label>
+        <label class="check"><input type="checkbox" id="opt-useMapColors" /> 使用譜面自訂顏色</label>
+        <label class="range">身高 <output id="out-playerHeight"></output>
+          <input type="range" id="opt-playerHeight" min="1.2" max="2.3" step="0.01" /></label>
+        <label class="range">音訊延遲 <output id="out-audioLatencyMs"></output>
+          <input type="range" id="opt-audioLatencyMs" min="-200" max="400" step="5" /></label>
+        <div class="calib">
+          <div class="row">
+            <button id="cal-start" class="btn small" type="button">開始節拍測試</button>
+            <button id="cal-tap" class="btn small tap" type="button" disabled>敲擊（或按空白鍵）</button>
+            <button id="cal-apply" class="btn small" type="button" disabled>套用</button>
+          </div>
+          <div id="cal-info" class="muted small-text">聽到「嗒」聲時敲擊，測出耳機 / 喇叭的額外延遲。正值 = 聲音比畫面晚。</div>
+        </div>
+        <label class="range">音樂音量 <output id="out-volume"></output>
+          <input type="range" id="opt-volume" min="0" max="1" step="0.05" /></label>
+        <label class="range">打擊音效 <output id="out-sfxVolume"></output>
+          <input type="range" id="opt-sfxVolume" min="0" max="1" step="0.05" /></label>
+        <label class="range">光劍角度 <output id="out-saberAngle"></output>
+          <input type="range" id="opt-saberAngle" min="-60" max="60" step="5" /></label>
         <label class="select">VR 時電腦螢幕顯示
           <select id="opt-spectator">
             <option value="third">第三人稱視角</option>
@@ -101,15 +115,16 @@
             <option value="off">關閉（一體機建議）</option>
           </select></label>
         <div class="row colors">
-          <label>左劍 <input type="color" id="opt-left" value="#c81e1e" /></label>
-          <label>右劍 <input type="color" id="opt-right" value="#2a8fe0" /></label>
+          <label>左劍 <input type="color" id="opt-leftColor" /></label>
+          <label>右劍 <input type="color" id="opt-rightColor" /></label>
         </div>
         <details class="help">
           <summary>操作說明</summary>
           <ul>
             <li><b>VR</b>：左手紅劍、右手藍劍。依箭頭方向揮砍方塊，圓點方塊任意方向皆可。</li>
             <li>躲開炸彈與紅色牆壁（頭部進入牆壁會扣血）。</li>
-            <li>扳機：開始 / 繼續 / 再玩一次。B / Y：暫停、回選單。A / X（暫停中）：重新開始。</li>
+            <li>VR 中用控制器的雷射指向按鈕、扣扳機點選；搖桿上下可捲動清單。B / Y：暫停 / 返回，A / X（暫停中）：重新開始。</li>
+            <li>VR 選單可直接搜尋下載 BeatSaver 譜面、調整設定、測量身高與校正音訊延遲。</li>
             <li><b>觀戰畫面</b>：用 PC VR 遊玩時，電腦螢幕會顯示第三人稱視角，按 V 或畫面上方按鈕切換。</li>
             <li><b>桌面預覽</b>：滑鼠揮動藍劍，按住左鍵改控制紅劍；A/D 左右閃避、S 蹲下；空白鍵暫停。</li>
           </ul>

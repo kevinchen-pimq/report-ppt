@@ -12,9 +12,11 @@
   - 網址參數：`?id=25f`（BeatSaver ID）或 `?url=<zip 網址>`
 - **支援的譜面格式**
   - `Info.dat` v2.x、v4.x
-  - 難度檔 v2（`_notes`）、v3（`colorNotes` / `burstSliders`）、v4（`colorNotesData` / `chains` / `AudioData.dat` BPM 區段 / `Lightshow.dat`）
+  - 難度檔 v2（`_notes`）、v3（`colorNotes` / `burstSliders` / `sliders`）、v4（`colorNotesData` / `chains` / `arcs` / `njsEvents` / `AudioData.dat` BPM 區段 / `Lightshow.dat`）
   - BPM 變化（v2 `_BPMChanges`、事件 100、v3 `bpmEvents`、v4 `bpmData`）
-  - 方塊、圓點方塊、角度偏移、鏈（Chain）、炸彈、牆壁、基本燈光事件
+  - 方塊、圓點方塊、角度偏移、鏈（Chain）、**弧線（Arc）**、炸彈、牆壁、基本燈光事件、色彩加強（Boost）事件
+  - **NJS 變速事件**（v4 `njsEvents`，含緩動曲線）：方塊速度隨譜面變化，反應時間不變
+  - **譜面自訂顏色**：v2.1 / v4 `colorSchemes`、v2 難度 `_customData`（`_colorLeft`、`_envColorLeft`、`_obstacleColor`…），可在設定中關閉
   - Standard、OneSaber、NoArrows、Lawless、Lightshow 等譜面特性（360/90 度的旋轉事件會被忽略）
 - **遊玩**
   - 左手紅劍、右手藍劍，依箭頭方向揮砍；判定顏色、方向、揮劍速度
@@ -24,6 +26,14 @@
   - 方塊被切成兩半的碎片、火花、控制器震動回饋、打擊音效
   - 依譜面燈光事件變化的雷射、光環、跑道燈
   - 結算畫面（等級 SS～E、百分比、最大連擊）
+- **VR 內選單**（控制器雷射指向 + 扳機點選，搖桿捲動）
+  - 歌曲庫：網頁上載入或 VR 中下載的歌曲
+  - BeatSaver：高評分 / 最新 / 精選、虛擬鍵盤搜尋、直接下載
+  - 歌曲頁：選擇譜面特性與難度，顯示方塊數、NJS、變速事件、自訂顏色
+  - 設定、開始前 / 暫停 / 結算畫面（暫停中可直接調整延遲與音量）、本機最佳成績
+- **身高校正**：在 VR 中站直按「測量身高」，或手動輸入；方塊與牆壁高度依原作公式調整
+- **音訊延遲校正**：節拍測試，跟著「嗒」聲扣扳機（或在網頁上敲擊），取中位數得出延遲；
+  再對照閃爍光圈微調。藍牙耳機等額外延遲都能補償
 - **觀戰畫面**：用 PC VR（Chrome / Edge + SteamVR / Link）遊玩時，電腦螢幕會顯示第三人稱視角（含玩家替身），
   也可切換成平滑的第一人稱視角或關閉；按 V 或畫面上方的按鈕切換。Quest 等一體機預設關閉以節省效能
 - **桌面預覽**：沒有 VR 也能用滑鼠試玩，或開啟「自動遊玩」觀賞譜面
@@ -32,14 +42,16 @@
 
 | 動作 | VR | 桌面預覽 |
 | --- | --- | --- |
-| 開始 / 繼續 / 再玩一次 | 扳機 | 點擊畫面 / 空白鍵 |
+| 選單操作 | 雷射指向按鈕 + 扳機，搖桿上下捲動 | 滑鼠點選 / 滾輪 |
+| 開始 / 繼續 / 再玩一次 | 按面板上的按鈕 | 空白鍵或點按鈕 |
 | 暫停 | B / Y | 空白鍵 |
 | 重新開始（暫停中） | A / X | R |
-| 回到選單 | B / Y（暫停中或結算時） | Esc |
+| 回到選單 | B / Y（暫停中、開始前或結算時） | Esc |
 | 揮劍 | 揮動控制器 | 移動滑鼠（藍劍），按住左鍵改控制紅劍 |
 | 閃避牆壁 | 移動頭部 | A / D 左右、S 蹲下 |
 
-設定中可以調整：音訊延遲補償、音量、打擊音效、光劍角度（光劍相對手把的傾斜）、光劍顏色。
+設定（網頁與 VR 選單共用並自動儲存）：不會失敗、自動遊玩、譜面自訂顏色、身高、音訊延遲、音量、打擊音效、
+光劍角度（光劍相對手把的傾斜）、光劍顏色、觀戰畫面。
 
 ## 執行
 
@@ -53,7 +65,8 @@ python3 -m http.server 8000
 ```
 
 在 Meta Quest 上遊玩，可以把這個 repo 用 GitHub Pages 發佈（Settings → Pages → Deploy from branch，選擇根目錄），
-再用 Quest 瀏覽器開啟網址，載入譜面後按「進入 VR 遊玩」。在 Quest 上最方便的是直接用 BeatSaver 搜尋或輸入 ID 載入。
+再用 Quest 瀏覽器開啟網址，按「進入 VR 選單」後在 VR 裡搜尋 BeatSaver 譜面即可。
+第一次玩建議先到「身高 / 延遲校正」測量身高與音訊延遲。
 
 PC VR 可使用 Chrome / Edge 搭配 SteamVR 或 Oculus Link。
 
@@ -62,12 +75,18 @@ PC VR 可使用 Chrome / Edge 搭配 SteamVR 或 Oculus Link。
 ```
 index.html              選單介面
 css/style.css
-js/main.js              介面、檔案載入、BeatSaver 整合
-js/mapLoader.js         zip / 資料夾讀取、Info.dat 解析（v2 / v4）
-js/beatmap.js           難度檔解析（v2 / v3 / v4）、BPM 時間換算、鏈的展開、最高分計算
+js/main.js              網頁介面、檔案載入、BeatSaver 整合
+js/settings.js          設定（網頁與 VR 共用，存在 localStorage）
+js/library.js           歌曲庫：載入、下載、解析難度、音樂解碼快取
+js/mapLoader.js         zip / 資料夾讀取、Info.dat 解析（v2 / v4）、譜面自訂顏色
+js/beatmap.js           難度檔解析（v2 / v3 / v4）、BPM 時間換算、鏈與弧線、NJS 變速曲線、最高分計算
 js/beatsaver.js         BeatSaver API
 js/game/Game.js         遊戲主迴圈、WebXR session、控制器、桌面輸入、自動遊玩
 js/game/Notes.js        方塊 / 炸彈 / 鏈 / 牆的生成、移動、碰撞與切割判定
+js/game/Arcs.js         弧線的繪製與震動回饋
+js/game/Menu.js         VR 選單各頁面（歌曲庫、BeatSaver、設定、校正、開始 / 暫停 / 結算）
+js/game/ui/             Canvas 面板元件與控制器雷射指標
+js/game/Calibration.js  音訊延遲節拍測試
 js/game/Saber.js        光劍模型、軌跡、速度與揮劍角度追蹤
 js/game/Score.js        計分、連擊倍率、血量
 js/game/Environment.js  場景與燈光事件

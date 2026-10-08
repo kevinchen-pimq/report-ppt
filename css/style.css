@@ -226,3 +226,11 @@ html, body {
   color: var(--text);
   font-size: 14px;
 }
+
+.results.small { max-height: 220px; }
+.results.small img { width: 36px; height: 36px; }
+.vr-menu { width: 100%; margin-top: 12px; }
+.calib { margin: -4px 0 8px; padding: 10px; border: 1px dashed var(--border); border-radius: 10px; }
+.calib .row { margin-top: 0; }
+.calib .tap { flex: 1; }
+.calib .tap.flash { background: rgba(124, 156, 255, 0.6); }

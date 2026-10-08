@@ -11,7 +11,14 @@ export const COLOR_WALL = 0xff3050;
 
 // Lane / layer -> world coordinates
 export const laneX = (x) => (x - 1.5) * LANE_W;
-export const layerY = (y) => BASE_Y + y * LAYER_H;
+
+// Player height shifts notes and walls like the original game (default height 1.8 m)
+let heightOffset = 0;
+export function setPlayerHeight(h) {
+  heightOffset = Math.max(-0.2, Math.min(0.6, ((Number(h) || 1.8) - 1.8) * 0.5));
+}
+export const getHeightOffset = () => heightOffset;
+export const layerY = (y) => BASE_Y + heightOffset + y * LAYER_H;
 
 const DIR_BASE = [
   [0, 1], [0, -1], [-1, 0], [1, 0],

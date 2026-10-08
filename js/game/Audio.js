@@ -9,7 +9,7 @@ export class GameAudio {
     this.startCtxTime = 0;
     this.startSongTime = 0;
     this.pausedAt = 0;
-    this.offsetMs = 0;
+    this.offsetMs = 0; // extra audio latency (ms): positive = sound reaches the ears later
     this.volume = 0.8;
     this.sfxVolume = 0.5;
   }
@@ -52,9 +52,35 @@ export class GameAudio {
     if (this.sfx) this.sfx.gain.value = v;
   }
 
-  get latency() {
+  /** Hardware-reported output latency in seconds. */
+  get baseLatency() {
     if (!this.ctx) return 0;
-    return (this.ctx.outputLatency || this.ctx.baseLatency || 0) - this.offsetMs / 1000;
+    return this.ctx.outputLatency || this.ctx.baseLatency || 0;
+  }
+
+  /** Total delay between scheduling a sample and hearing it. */
+  get latency() {
+    return this.baseLatency + this.offsetMs / 1000;
+  }
+
+  /** performance.now() (ms) at which a sample scheduled at context time T is heard (before user offset). */
+  heardPerfTime(T) {
+    return performance.now() + (T - this.ctx.currentTime + this.baseLatency) * 1000;
+  }
+
+  /** A short metronome click at context time `when` (accent = higher pitch). */
+  click(when, accent = false) {
+    const ctx = this.ensureContext();
+    const osc = ctx.createOscillator();
+    const g = ctx.createGain();
+    osc.frequency.value = accent ? 1760 : 1320;
+    g.gain.setValueAtTime(0.0001, when);
+    g.gain.exponentialRampToValueAtTime(0.6, when + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.0001, when + 0.06);
+    osc.connect(g);
+    g.connect(ctx.destination);
+    osc.start(when);
+    osc.stop(when + 0.08);
   }
 
   /** Current song time in seconds, as heard by the player. */

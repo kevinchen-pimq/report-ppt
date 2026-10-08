@@ -52,13 +52,6 @@ export class Hud {
     this.bottom.mesh.rotation.x = -0.5;
     this.root.add(this.left.mesh, this.right.mesh, this.bottom.mesh);
 
-    // Floating message board (ready / pause / results)
-    this.board = new CanvasPanel(2.4, 1.5, 420);
-    this.board.mesh.position.set(0, 1.55, -3.0);
-    this.board.mesh.renderOrder = 20;
-    scene.add(this.board.mesh);
-    this.board.mesh.visible = false;
-
     // Hit score popups
     this.popups = [];
     for (let i = 0; i < 12; i++) {
@@ -189,46 +182,6 @@ export class Hud {
       p.life = 0;
       p.panel.mesh.visible = false;
     }
-  }
-
-  /** lines: [{ text, size, color, weight }] */
-  showBoard(lines, cover) {
-    this.board.draw((ctx, w, h) => {
-      ctx.fillStyle = 'rgba(8,10,24,0.88)';
-      roundRect(ctx, 6, 6, w - 12, h - 12, 36);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(120,160,255,0.7)';
-      ctx.lineWidth = 5;
-      ctx.stroke();
-      let y = 40;
-      let textX = w / 2;
-      const coverSize = 240;
-      ctx.textAlign = 'center';
-      if (cover) {
-        try {
-          ctx.drawImage(cover, 60, 60, coverSize, coverSize);
-        } catch (e) {
-          /* image not ready */
-        }
-        textX = 60 + coverSize + (w - 60 - coverSize) / 2;
-      }
-      for (const line of lines.filter((l) => l.text)) {
-        const size = line.size || 48;
-        if (cover && line.full && y < 60 + coverSize + 10) y = 60 + coverSize + 10;
-        y += size;
-        ctx.font = `${line.weight || 600} ${size}px ${FONT}`;
-        ctx.fillStyle = line.color || '#fff';
-        const beside = cover && !line.full && y < 60 + coverSize + 20;
-        const x = beside ? textX : w / 2;
-        ctx.fillText(line.text, x, y, beside ? w - coverSize - 120 : w - 80);
-        y += size * 0.32 + (line.gap || 0);
-      }
-    });
-    this.board.mesh.visible = true;
-  }
-
-  hideBoard() {
-    this.board.mesh.visible = false;
   }
 }
 

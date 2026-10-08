@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import {
   NOTE_SIZE, COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, WALL_UNIT, LANE_W,
-  laneX, layerY, noteRotation, rotationToDir,
+  laneX, layerY, noteRotation, rotationToDir, getHeightOffset,
 } from './constants.js';
 
 const MOVE_TIME = 0.4; // seconds of fast "fly-in" before the jump starts
@@ -96,7 +96,9 @@ export class NoteManager {
     this.reset(null);
   }
 
-  setColors(left, right) {
+  setColors(left, right, obstacle = COLOR_WALL) {
+    this.wallMat.color.set(obstacle);
+    this.wallEdgeMat.color.set(obstacle);
     this.colors[0].set(left);
     this.colors[1].set(right);
     this.bodyMats[0].color.copy(this.colors[0]);
@@ -114,9 +116,10 @@ export class NoteManager {
     this.noteIdx = 0;
     this.wallIdx = 0;
     if (map) {
-      this.njs = map.njs;
+      this.baseNjs = map.njs;
+      this.njs = map.njsAt(0);
       this.halfJump = map.halfJump;
-      this.jumpDist = map.njs * map.halfJump; // half jump distance
+      this.jumpDist = this.njs * map.halfJump; // half jump distance
       this.spawnLead = map.halfJump + MOVE_TIME;
     }
   }
@@ -204,8 +207,10 @@ export class NoteManager {
     const width = Math.abs(wall.w) * LANE_W;
     const left = wall.w >= 0 ? (wall.x - 2) * LANE_W : (wall.x - 2 + wall.w) * LANE_W;
     // Height: layers are 0..2 from the floor; height in "layer units" of WALL_UNIT
-    const bottom = Math.max(0, wall.y * WALL_UNIT * 1.05);
-    const height = Math.max(0.05, Math.abs(wall.h) * WALL_UNIT);
+    const off = getHeightOffset();
+    const bottom = wall.y > 0 ? wall.y * WALL_UNIT * 1.05 + off : 0;
+    const top = Math.max(0, wall.y) * WALL_UNIT * 1.05 + Math.abs(wall.h) * WALL_UNIT + off;
+    const height = Math.max(0.05, top - bottom);
     w.cx = left + width / 2;
     w.cy = bottom + height / 2;
     w.width = width;
@@ -259,6 +264,9 @@ export class NoteManager {
 
   update(t, dt, sabers, autoplay) {
     if (!this.map) return;
+    // NJS events change the travel speed; the reaction time (half jump duration) stays fixed
+    this.njs = this.map.njsAt(t);
+    this.jumpDist = this.njs * this.halfJump;
     const notes = this.map.notes;
     // spawn
     while (this.noteIdx < notes.length && notes[this.noteIdx].time - this.spawnLead <= t) {
@@ -280,7 +288,7 @@ export class NoteManager {
       obj.group.updateMatrixWorld(true);
       if (!obj.done) {
         if (autoplay) {
-          const lead = 0.55 / this.njs;
+          const lead = 0.55 / this.baseNjs;
           if (obj.kind !== 'bomb' && t >= obj.note.time - lead) {
             const saber = sabers[obj.note.color] || sabers[1];
             this.cutNote(obj, saber, this.evaluate(obj, saber, true));

@@ -1,17 +1,23 @@
 import * as THREE from 'three';
 import { Environment } from './Environment.js';
 import { NoteManager } from './Notes.js';
+import { ArcManager } from './Arcs.js';
 import { Effects } from './Effects.js';
 import { Hud } from './Hud.js';
 import { Saber } from './Saber.js';
 import { ScoreKeeper } from './Score.js';
 import { GameAudio } from './Audio.js';
-import { Spectator, defaultSpectatorMode } from './Spectator.js';
-import { COLOR_LEFT, COLOR_RIGHT, laneX, layerY, noteRotation, rotationToDir } from './constants.js';
+import { Spectator } from './Spectator.js';
+import { Menu } from './Menu.js';
+import { Pointers } from './ui/Pointers.js';
+import { LatencyCalibrator } from './Calibration.js';
+import { settings } from '../settings.js';
+import { COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, laneX, layerY, noteRotation, rotationToDir, setPlayerHeight } from './constants.js';
 
 const LEAD_IN = 2.0; // seconds before the song starts
 const AUTO_SWING = 0.12; // seconds for half an autoplay swing
 const AUTO_CUT_Z = 0.55; // metres in front of the player where autoplay cuts
+const BEST_KEY = 'webxr-saber-best';
 
 const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
@@ -21,20 +27,16 @@ const _up = new THREE.Vector3(0, 1, 0);
 const _ray = new THREE.Raycaster();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0.9);
 
+const hex = (c) => (typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : c);
+
+/**
+ * States: idle (2D page) · menu (in-VR menu) · loading · ready · playing · paused · finished
+ */
 export class Game {
-  constructor(container, hooks = {}) {
-    this.hooks = hooks; // { onExit(results), onStateChange(state) }
-    this.settings = {
-      noFail: false,
-      autoplay: false,
-      offsetMs: 0,
-      saberAngle: 0,
-      volume: 0.8,
-      sfxVolume: 0.5,
-      leftColor: COLOR_LEFT,
-      rightColor: COLOR_RIGHT,
-      spectator: defaultSpectatorMode(),
-    };
+  constructor(container, { library, hooks = {} }) {
+    this.hooks = hooks; // { onExit(results) }
+    this.library = library;
+    this.settings = settings.all;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -57,6 +59,7 @@ export class Game {
     this.effects = new Effects(this.scene);
     this.score = new ScoreKeeper();
     this.audio = new GameAudio();
+    this.calibrator = new LatencyCalibrator(this.audio);
     this.hud = new Hud(this.scene);
     this.hud.setVisible(false);
 
@@ -69,6 +72,7 @@ export class Game {
       onBadCut: (note, saber, reason, pos) => this.onBadCut(note, saber, reason, pos),
       onBomb: (note, saber) => this.onBomb(note, saber),
     });
+    this.arcs = new ArcManager(this.scene);
 
     // Red vignette when the head is inside a wall
     this.wallShade = new THREE.Mesh(
@@ -80,63 +84,96 @@ export class Game {
 
     // Third-person / smoothed view on the PC monitor while in VR
     this.spectator = new Spectator(this.scene);
-    this.spectator.onModeChange = (mode) => {
-      this.settings.spectator = mode;
-      this.hooks.onSpectatorMode?.(mode);
-    };
+    this.spectator.onModeChange = (mode) => settings.set({ spectator: mode });
 
     this.state = 'idle';
     this.mode = 'desktop';
     this.map = null;
+    this.meta = null;
     this.headPos = new THREE.Vector3(0, 1.6, 0);
     this.lean = { x: 0, crouch: false };
     this.lastFrame = performance.now();
 
     this.setupXRControllers();
+    this.menu = new Menu(this);
+    this.pointers = new Pointers(this);
     this.setupDesktopInput();
+
+    this.applySettings(settings.all);
+    settings.subscribe((s) => this.applySettings(s));
 
     window.addEventListener('resize', () => this.onResize());
     renderer.setAnimationLoop((ts, frame) => this.loop(ts, frame));
   }
 
   // ---------------------------------------------------------------------------
-  // Settings
+  // Settings & colours
   applySettings(s) {
-    Object.assign(this.settings, s);
-    this.audio.offsetMs = this.settings.offsetMs;
-    this.audio.setVolume(this.settings.volume);
-    this.audio.setSfxVolume(this.settings.sfxVolume);
-    this.sabers[0].setColor(this.settings.leftColor);
-    this.sabers[1].setColor(this.settings.rightColor);
-    this.notes.setColors(this.settings.leftColor, this.settings.rightColor);
-    this.env.setColors(this.settings.leftColor, this.settings.rightColor);
-    this.spectator.setMode(this.settings.spectator);
+    this.settings = s;
+    this.audio.offsetMs = s.audioLatencyMs;
+    this.audio.setVolume(s.volume);
+    this.audio.setSfxVolume(s.sfxVolume);
+    this.spectator.setMode(s.spectator);
+    this.menu.placeForHeight(s.playerHeight);
+    if (this.state !== 'playing') {
+      setPlayerHeight(s.playerHeight);
+      this.applyColors();
+    }
+  }
+
+  /** Saber / note / light / wall colours: map colour scheme (if enabled) over the player's colours. */
+  applyColors() {
+    const s = this.settings;
+    const mc = s.useMapColors && this.meta?.colors ? this.meta.colors : {};
+    const left = mc.left ?? hex(s.leftColor);
+    const right = mc.right ?? hex(s.rightColor);
+    const envLeft = mc.envLeft ?? left;
+    const envRight = mc.envRight ?? right;
+    this.sabers[0].setColor(left);
+    this.sabers[1].setColor(right);
+    this.notes.setColors(left, right, mc.obstacle ?? COLOR_WALL);
+    this.arcs.setColors(left, right);
+    this.env.setColors(envLeft, envRight, mc.envLeftBoost ?? envLeft, mc.envRightBoost ?? envRight);
   }
 
   // ---------------------------------------------------------------------------
-  // Loading
-  async loadSong(songBytes) {
-    await this.audio.decode(songBytes);
-  }
-
+  // Loading & sessions
   setMap(map, meta) {
     this.map = map;
-    this.meta = meta; // { title, subTitle, artist, mapper, difficulty, characteristic, coverImage }
+    this.meta = meta; // { title, subTitle, artist, mapper, characteristic, difficultyName, coverImage, colors }
     this.oneSaber = meta.characteristic === 'OneSaber';
-    this.autoNotes = [0, 1].map((c) =>
-      map.notes
-        .filter((n) => n.kind === 'note' && n.color === c)
-        .map((n) => {
-          const rot = noteRotation(n.dir, n.angle);
-          const d = n.dir === 8 ? [0, -1] : rotationToDir(rot);
-          return { t: n.time - AUTO_CUT_Z / map.njs, x: laneX(n.x), y: layerY(n.y), dx: d[0], dy: d[1] };
-        }),
-    );
   }
 
-  // ---------------------------------------------------------------------------
-  // Sessions
-  async startVR() {
+  /** Loads a library entry's difficulty and goes to the ready screen. */
+  async playEntry(entry, setIdx, diffIdx) {
+    const prevState = this.state;
+    this.state = 'loading';
+    this.showPanel('loading');
+    try {
+      const buffer = await this.library.audioFor(entry, this.audio);
+      this.audio.buffer = buffer;
+      const { map, meta } = this.library.loadDifficulty(entry, setIdx, diffIdx);
+      this.current = { entry, setIdx, diffIdx };
+      this.setMap(map, meta);
+      this.enterReady();
+    } catch (e) {
+      console.error(e);
+      this.state = prevState === 'loading' ? 'menu' : prevState;
+      if (this.mode === 'vr') {
+        this.showMenu('song');
+        this.menu.setStatus(`載入失敗：${e.message}`);
+      } else {
+        this.exitToMenu();
+        this.hooks.onError?.(e);
+      }
+    }
+  }
+
+  showPanel(page) {
+    this.menu.open(page);
+  }
+
+  async startVR(pending) {
     if (!navigator.xr) throw new Error('此瀏覽器不支援 WebXR');
     this.audio.ensureContext();
     const session = await navigator.xr.requestSession('immersive-vr', {
@@ -150,13 +187,18 @@ export class Game {
     await this.renderer.xr.setSession(session);
     this.xrSession = session;
     this.spectator.start();
-    this.enterReady();
+    if (pending) this.playEntry(pending.entry, pending.setIdx, pending.diffIdx);
+    else this.showMenu(this.library.entries.length ? 'library' : 'browse');
   }
 
-  startDesktop() {
+  startDesktop(entry, setIdx, diffIdx) {
     this.audio.ensureContext();
     this.mode = 'desktop';
-    this.enterReady();
+    return this.playEntry(entry, setIdx, diffIdx);
+  }
+
+  exitVR() {
+    if (this.xrSession) this.xrSession.end().catch(() => {});
   }
 
   resetDesktopCamera() {
@@ -171,95 +213,119 @@ export class Game {
     this.spectator.stop();
     this.mode = 'desktop';
     this.resetDesktopCamera();
-    if (this.state !== 'idle') this.exitToMenu();
+    this.pointers.hideAll(this.menu.panels);
+    this.stopGameplay();
+    this.menu.hide();
+    const results = this.state === 'finished' ? this.lastResults : null;
+    this.state = 'idle';
+    this.hooks.onExit?.(results);
   }
 
-  exitToMenu() {
-    const results = this.state === 'finished' ? this.lastResults : null;
+  stopGameplay() {
     this.audio.stop();
-    this.state = 'idle';
     this.notes.reset(null);
+    this.arcs.reset(null);
     this.effects.clear();
     this.hud.setVisible(false);
-    this.hud.hideBoard();
     this.hud.clearPopups();
     this.env.reset([]);
-    if (this.xrSession) {
-      const s = this.xrSession;
-      this.xrSession = null;
-      s.end().catch(() => {});
+    this.inWall = false;
+  }
+
+  /** In-VR menu (song library etc). */
+  showMenu(page) {
+    this.stopGameplay();
+    this.state = 'menu';
+    this.applyColors();
+    this.menu.open(page);
+  }
+
+  /** "Back to menu": the VR menu inside VR, the web page otherwise. */
+  exitToMenu() {
+    if (this.mode === 'vr') {
+      if (this.current) this.menu.openSong(this.current.entry, this.current.setIdx, this.current.diffIdx);
+      this.showMenu(this.current ? 'song' : 'library');
+      return;
     }
+    const results = this.state === 'finished' ? this.lastResults : null;
+    this.stopGameplay();
+    this.menu.hide();
+    this.state = 'idle';
     this.hooks.onExit?.(results);
   }
 
   enterReady() {
     this.prepareRun();
     this.state = 'ready';
-    const m = this.meta;
-    const startHint = this.mode === 'vr' ? '扣下扳機開始' : '點擊畫面或按空白鍵開始';
-    this.hud.showBoard(
-      [
-        { text: m.title, size: 64, weight: 800 },
-        { text: m.subTitle || '', size: 36, color: '#aab' },
-        { text: m.artist, size: 40, color: '#ccd' },
-        { text: `${m.characteristic} · ${m.difficultyName}`, size: 40, color: '#8cf' },
-        { text: `譜師 ${m.mapper || '-'}`, size: 32, color: '#99a', gap: 30 },
-        { text: startHint, size: 58, weight: 800, color: '#fff', full: true },
-        { text: this.mode === 'vr' ? 'B / Y 鍵：暫停' : '空白鍵：暫停 · Esc：離開 · 滑鼠：揮劍（按住左鍵換紅劍）', size: 30, color: '#99a', full: true },
-      ],
-      m.coverImage,
-    );
+    this.showPanel('ready');
   }
 
   prepareRun() {
+    setPlayerHeight(this.settings.playerHeight);
+    this.applyColors();
     this.audio.stop();
     this.notes.reset(this.map);
+    this.arcs.reset(this.map);
     this.env.reset(this.map.events);
     this.score.reset(this.map.maxScore);
     this.effects.clear();
     this.hud.clearPopups();
     this.hud.setVisible(true);
+    this.setPlayfieldVisible(true);
     this.autoIdx = [0, 0];
+    this.autoNotes = [0, 1].map((c) =>
+      this.map.notes
+        .filter((n) => n.kind === 'note' && n.color === c)
+        .map((n) => {
+          const rot = noteRotation(n.dir, n.angle);
+          const d = n.dir === 8 ? [0, -1] : rotationToDir(rot);
+          return { t: n.time - AUTO_CUT_Z / this.map.njs, x: laneX(n.x), y: layerY(n.y), dx: d[0], dy: d[1] };
+        }),
+    );
     const firstObj = Math.min(
       this.map.notes.length ? this.map.notes[0].time : Infinity,
       this.map.walls.length ? this.map.walls[0].time : Infinity,
+      this.map.arcs.length ? this.map.arcs[0].time : Infinity,
     );
     this.startTime = Math.min(-LEAD_IN, firstObj - this.notes.spawnLead - 0.5);
     this.audio.pausedAt = this.startTime;
     this.endTime = Math.max(this.audio.duration, this.map.lastTime + 1) + 0.5;
-    this.sabers[0].setVisible(!this.oneSaber);
-    this.sabers[1].setVisible(true);
     this.inWall = false;
   }
 
   beginPlay() {
-    this.hud.hideBoard();
+    if (this.state !== 'ready') return;
+    this.menu.hide();
     this.state = 'playing';
     this.audio.play(this.startTime);
-    this.hooks.onStateChange?.(this.state);
   }
 
   pause() {
     if (this.state !== 'playing') return;
     this.audio.pause();
     this.state = 'paused';
-    this.hud.showBoard([
-      { text: '暫停', size: 90, weight: 800 },
-      { text: this.mode === 'vr' ? '扳機：繼續' : '空白鍵 / 點擊：繼續', size: 48, gap: 10 },
-      { text: this.mode === 'vr' ? 'A / X：重新開始' : 'R：重新開始', size: 48 },
-      { text: this.mode === 'vr' ? 'B / Y：回到選單' : 'Esc：回到選單', size: 48 },
-    ]);
+    this.setPlayfieldVisible(false);
+    this.showPanel('pause');
   }
 
   resume() {
     if (this.state !== 'paused') return;
-    this.hud.hideBoard();
+    this.menu.hide();
+    this.setPlayfieldVisible(true);
     this.state = 'playing';
     this.audio.resume();
   }
 
+  setPlayfieldVisible(v) {
+    this.notes.root.visible = v;
+    this.arcs.root.visible = v;
+  }
+
   restart() {
+    if (!this.map) return;
+    this.menu.hide();
     this.prepareRun();
+    this.state = 'ready';
     this.beginPlay();
   }
 
@@ -272,19 +338,31 @@ export class Game {
     r.title = this.meta.title;
     r.difficulty = this.meta.difficultyName;
     r.characteristic = this.meta.characteristic;
+    if (!failed && !this.settings.autoplay) r.best = this.recordBest(r);
     this.lastResults = r;
-    this.hud.showBoard(
-      [
-        { text: failed ? 'LEVEL FAILED' : 'LEVEL CLEARED', size: 76, weight: 900, color: failed ? '#ff4060' : '#60ffa0' },
-        { text: `${this.meta.title} · ${this.meta.difficultyName}`, size: 38, color: '#ccd' },
-        { text: `${r.rank}   ${r.percent.toFixed(2)}%`, size: 88, weight: 900 },
-        { text: `分數 ${r.score.toLocaleString('en-US')}   最大連擊 ${r.maxCombo}`, size: 40 },
-        { text: `命中 ${r.hits}   Miss ${r.misses}   壞切 ${r.badCuts}   炸彈 ${r.bombHits}`, size: 36, color: '#aab', gap: 16 },
-        { text: this.mode === 'vr' ? '扳機：再玩一次 · B / Y：回到選單' : '空白鍵：再玩一次 · Esc：回到選單', size: 40, color: '#8cf' },
-      ],
-      null,
-    );
-    this.hooks.onStateChange?.(this.state);
+    this.showPanel('results');
+  }
+
+  recordBest(r) {
+    if (!this.current) return null;
+    const key = `${this.current.entry.key}|${r.characteristic}|${r.difficulty}`;
+    let all = {};
+    try {
+      all = JSON.parse(localStorage.getItem(BEST_KEY) || '{}');
+    } catch (e) {
+      /* ignore */
+    }
+    const prev = all[key];
+    const isNew = !prev || r.score > prev.score;
+    if (isNew) {
+      all[key] = { score: r.score, percent: r.percent, rank: r.rank, date: Date.now() };
+      try {
+        localStorage.setItem(BEST_KEY, JSON.stringify(all));
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    return { ...(isNew ? all[key] : prev), isNew };
   }
 
   // ---------------------------------------------------------------------------
@@ -344,7 +422,7 @@ export class Game {
       ray.addEventListener('disconnected', () => {
         this.xrInputs[i] = null;
       });
-      ray.addEventListener('selectstart', () => this.onTrigger());
+      ray.addEventListener('selectstart', () => this.onSelect(i));
     }
   }
 
@@ -358,10 +436,14 @@ export class Game {
     return null;
   }
 
-  onTrigger() {
-    if (this.state === 'ready') this.beginPlay();
-    else if (this.state === 'paused') this.resume();
-    else if (this.state === 'finished') this.restart();
+  get pointersActive() {
+    return this.menu.visible && this.state !== 'playing';
+  }
+
+  onSelect(i) {
+    if (!this.pointersActive) return;
+    if (this.pointers.click(i)) return;
+    this.menu.onFreeTrigger();
   }
 
   pollXRButtons() {
@@ -377,7 +459,8 @@ export class Game {
       prev[5] = gp.buttons[5]?.pressed;
       if (b) {
         if (this.state === 'playing') this.pause();
-        else if (this.state === 'paused' || this.state === 'finished' || this.state === 'ready') this.exitToMenu();
+        else if (['paused', 'finished', 'ready'].includes(this.state)) this.exitToMenu();
+        else if (this.state === 'menu' && this.menu.page === 'song') this.menu.open('library');
       } else if (a) {
         if (this.state === 'paused') this.restart();
       }
@@ -407,10 +490,17 @@ export class Game {
     });
     el.addEventListener('pointerdown', (e) => {
       if (this.mode !== 'desktop') return;
-      if (this.state === 'ready') this.beginPlay();
-      else if (this.state === 'paused') this.resume();
-      else if (e.button === 0) this.mouseLeft = true;
+      if (this.pointersActive) {
+        this.pointers.updateMouse(this.menu.panels, this.mouse, this.camera);
+        if (this.pointers.click(2)) return;
+        if (this.state === 'paused') this.resume();
+        return;
+      }
+      if (e.button === 0) this.mouseLeft = true;
     });
+    el.addEventListener('wheel', (e) => {
+      if (this.mode === 'desktop' && this.pointersActive) this.pointers.scroll(2, e.deltaY > 0 ? 1 : -1);
+    }, { passive: true });
     window.addEventListener('pointerup', () => {
       this.mouseLeft = false;
     });
@@ -516,42 +606,53 @@ export class Game {
     this.lastFrame = nowMs;
     const xr = this.renderer.xr.isPresenting;
     const t = this.audio.time;
+    const inGame = ['ready', 'playing', 'paused', 'finished'].includes(this.state);
 
     if (xr) {
       this.pollXRButtons();
       this.updateXRSabers();
       const cam = this.renderer.xr.getCamera();
       this.headPos.setFromMatrixPosition(cam.matrixWorld);
+      if (this.pointersActive) this.pointers.updateXR(this.menu.panels);
+      else this.pointers.hideAll(this.menu.panels);
     } else {
       this.updateDesktopSabers();
       this.headPos.set(this.camera.position.x, this.lean.crouch ? 1.1 : 1.6, 0);
+      if (this.pointersActive) this.pointers.updateMouse(this.menu.panels, this.mouse, this.camera);
     }
     if (this.settings.autoplay && (this.state === 'playing' || this.state === 'paused' || this.state === 'ready')) {
       this.updateAutoSabers(this.state === 'ready' ? this.startTime : t);
     }
+
+    // Sabers: in VR only while playing (menus use laser pointers); on desktop during a run
+    const showSabers = xr ? this.state === 'playing' : inGame;
+    this.sabers[0].setVisible(showSabers && !this.oneSaber);
+    this.sabers[1].setVisible(showSabers);
 
     const now = performance.now() / 1000;
     for (const s of this.sabers) s.update(now);
 
     if (this.state === 'playing') {
       this.notes.update(t, dt, this.sabers, this.settings.autoplay);
+      this.arcs.update(t, this.notes.njs, this.notes.halfJump, this.sabers, this.settings.autoplay ? null : (s, k, ms) => this.haptic(s, k, ms));
       this.score.update(now);
-      // walls
       const inWall = this.notes.headInWall(this.headPos);
       if (inWall) this.score.wall(dt);
       this.inWall = inWall;
       this.env.update(t, dt);
       if (this.score.failed && !this.settings.noFail) this.finish(true);
       else if (t >= this.endTime) this.finish(false);
-    } else if (this.state === 'idle') {
-      this.env.update(-1, dt);
-    } else {
+    } else if (inGame) {
       this.env.update(this.state === 'ready' ? this.startTime : t, dt);
+    } else {
+      this.env.update(-1, dt);
     }
     this.wallShade.material.opacity += ((this.inWall && this.state === 'playing' ? 0.35 : 0) - this.wallShade.material.opacity) * 0.3;
     this.wallShade.visible = this.wallShade.material.opacity > 0.01;
 
-    if (this.state !== 'idle') this.hud.update(this.score, 0, Math.max(0, t), this.audio.duration, dt);
+    if (inGame) this.hud.update(this.score, 0, Math.max(0, t), this.audio.duration, dt);
+    if (this.calibrator.running) this.calibrator.schedule();
+    this.menu.update(dt);
     this.effects.update(dt);
     this.renderer.render(this.scene, this.camera);
     if (xr) this.spectator.render(this.renderer.xr.getCamera(), this.sabers, [this.wallShade], dt);
