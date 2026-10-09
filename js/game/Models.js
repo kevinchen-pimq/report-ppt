@@ -133,6 +133,57 @@ export function createHullMaterial({ color = 0xffffff, thickness = 0.012, opacit
   });
 }
 
+// ---------------------------------------------------------------------------
+// Glass note body: deep, darker colour where the surface faces the viewer and a
+// bright glassy band where it turns away (the rounded edges), from any angle.
+
+const GLASS_VERT = /* glsl */ `
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vObjN;
+  varying vec3 vObjP;
+  void main() {
+    vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vN = normalize(normalMatrix * normal);
+    vV = normalize(-mv.xyz);
+    vObjN = normal;
+    vObjP = position;
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const GLASS_FRAG = /* glsl */ `
+  uniform vec3 color;
+  uniform float halfSize;
+  varying vec3 vN;
+  varying vec3 vV;
+  varying vec3 vObjN;
+  varying vec3 vObjP;
+  void main() {
+    vec3 an = abs(normalize(vObjN));
+    float flatness = max(an.x, max(an.y, an.z));            // 1 on flat faces, < 1 on the rounded bevels
+    float bevel = 1.0 - smoothstep(0.86, 0.997, flatness);  // glassy band on every rounded edge
+    float facing = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
+    float rim = pow(1.0 - facing, 4.0);
+    // soft glow toward the middle of each face
+    vec3 ap = abs(vObjP) / halfSize;
+    vec2 face = an.x > 0.9 ? ap.yz : (an.y > 0.9 ? ap.xz : ap.xy);
+    float centre = 1.0 - smoothstep(0.1, 0.85, length(face));
+    vec3 edge = mix(color, vec3(1.0), 0.12);
+    vec3 c = color * 0.26 + color * 0.24 * centre + edge * (bevel * 0.55 + rim * 0.55);
+    gl_FragColor = vec4(c, 1.0);
+    #include <colorspace_fragment>
+  }
+`;
+
+export function createGlassMaterial(color) {
+  return new THREE.ShaderMaterial({
+    uniforms: { color: { value: new THREE.Color(color) }, halfSize: { value: NOTE_SIZE / 2 } },
+    vertexShader: GLASS_VERT,
+    fragmentShader: GLASS_FRAG,
+  });
+}
+
 /** Wall look: translucent fill with edges, or edges only. */
 export function wallStyleParams(style) {
   return style === 'edges' ? { fill: 0.0, edge: 0.045, intensity: 1.5 } : { fill: 0.26, edge: 0.03, intensity: 1.1 };
@@ -476,11 +527,8 @@ export class NoteStyle {
       }), 'sprite'));
     }
     if (this.id === 'classic') {
-      this.rimGeo = edgeFrameGeometry(S, S, S, 0.07, 0.0045);
-      this.rimGlowGeo = edgeFrameGeometry(S, S, S, 0.07, 0.014);
-      this.disposables.push(this.rimGeo, this.rimGlowGeo);
-      this.rimMats = [0, 1].map((c) => this.track(c, additive(this.colors[c], 0.85), 'light'));
-      this.rimGlowMats = [0, 1].map((c) => this.track(c, additive(this.colors[c], 0.22), 'basic'));
+      // glass body (shader) + soft silhouette glow, like the reference: dark core, bright glassy edges
+      this.hullGlowMats = [0, 1].map((c) => this.track(c, createHullMaterial({ color: this.colors[c], thickness: 0.035, glow: true, opacity: 0.45 }), 'uniform'));
       this.haloMats = [0, 1].map((c) => this.track(c, new THREE.SpriteMaterial({
         map: glowTexture(), color: this.colors[c], transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
       }), 'sprite'));
@@ -511,8 +559,8 @@ export class NoteStyle {
       this.colorMats[c].push({ mat: m, kind: 'emissiveOnly' });
       return m;
     }
-    // classic: slightly darkened, glossy body so the rim / halo / arrow glow stand out
-    return this.track(c, new THREE.MeshStandardMaterial({ color: col.clone().multiplyScalar(0.72), roughness: 0.18, metalness: 0.1, emissive: col, emissiveIntensity: 0.3 }), 'dimmed');
+    if (this.id === 'classic') return this.track(c, createGlassMaterial(col), 'uniform');
+    return this.track(c, new THREE.MeshStandardMaterial({ color: col, roughness: 0.35, metalness: 0.15, emissive: col, emissiveIntensity: 0.18 }));
   }
 
   setColors(left, right) {
@@ -559,15 +607,17 @@ export class NoteStyle {
       const halo = new THREE.Sprite(this.haloMats[c]);
       halo.scale.setScalar(NOTE_SIZE * 1.9);
       halo.renderOrder = -1;
+      halo.position.z = -NOTE_SIZE * 0.7; // behind the block, so it never washes over the body
       group.add(hull, glow, halo);
     }
     if (this.id === 'classic') {
-      const rim = new THREE.Mesh(this.rimGeo, this.rimMats[c]);
-      const rimGlow = new THREE.Mesh(this.rimGlowGeo, this.rimGlowMats[c]);
+      const glow = new THREE.Mesh(this.bodyGeo, this.hullGlowMats[c]);
+      glow.renderOrder = 1;
       const halo = new THREE.Sprite(this.haloMats[c]);
-      halo.scale.setScalar(NOTE_SIZE * 1.9);
+      halo.scale.setScalar(NOTE_SIZE * 1.8);
       halo.renderOrder = -1;
-      group.add(rim, rimGlow, halo);
+      halo.position.z = -NOTE_SIZE * 0.7; // behind the block, so it never washes over the body
+      group.add(glow, halo);
     }
     return { group, body };
   }
