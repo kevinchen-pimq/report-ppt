@@ -333,14 +333,21 @@ export class NoteStyle {
       this.linkGeo = new THREE.BoxGeometry(S * 0.96, S * 0.26, S * 0.96);
       this.linkFrameGeo = new THREE.BoxGeometry(S, S * 0.28, S);
     } else {
-      this.bodyGeo = new RoundedBoxGeometry(S, S, S, 3, 0.07);
-      this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 2, 0.04);
+      // classic: tight corners, bright rim and a soft halo
+      this.bodyGeo = new RoundedBoxGeometry(S, S, S, 3, 0.035);
+      this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 2, 0.025);
     }
     this.disposables.push(this.bodyGeo, this.linkGeo, this.frameGeo, this.linkFrameGeo);
     this.mats = [0, 1].map((c) => this.makeBodyMaterial(c));
     if (this.id === 'neon') {
       this.frameMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.05, edge: 0.03, intensity: 1.6, size: [S, S, S] }), 'uniform'));
       this.linkFrameMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.05, edge: 0.02, intensity: 1.6, size: [S, S * 0.28, S] }), 'uniform'));
+    }
+    if (this.id === 'classic') {
+      this.rimMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.0, edge: 0.018, intensity: 1.25, size: [S, S, S] }), 'uniform'));
+      this.haloMats = [0, 1].map((c) => this.track(c, new THREE.SpriteMaterial({
+        map: glowTexture(), color: this.colors[c], transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      }), 'sprite'));
     }
     if (this.id === 'custom') this.customByColor = [0, 1].map((c) => fitNoteModel(custom));
   }
@@ -362,7 +369,8 @@ export class NoteStyle {
       this.colorMats[c].push({ mat: m, kind: 'emissiveOnly' });
       return m;
     }
-    return this.track(c, new THREE.MeshStandardMaterial({ color: col, roughness: 0.35, metalness: 0.15, emissive: col, emissiveIntensity: 0.18 }));
+    // classic: slightly darkened, glossy body so the rim / halo / arrow glow stand out
+    return this.track(c, new THREE.MeshStandardMaterial({ color: col.clone().multiplyScalar(0.72), roughness: 0.18, metalness: 0.1, emissive: col, emissiveIntensity: 0.3 }), 'dimmed');
   }
 
   setColors(left, right) {
@@ -372,6 +380,11 @@ export class NoteStyle {
       const col = this.colors[c];
       for (const { mat, kind } of this.colorMats[c]) {
         if (kind === 'uniform') mat.uniforms.color.value.copy(col);
+        else if (kind === 'sprite') mat.color.copy(col);
+        else if (kind === 'dimmed') {
+          mat.color.copy(col).multiplyScalar(0.72);
+          mat.emissive.copy(col);
+        }
         else if (kind === 'emissiveOnly') mat.emissive.copy(col);
         else {
           mat.color.copy(col);
@@ -396,6 +409,14 @@ export class NoteStyle {
     const body = new THREE.Mesh(this.bodyGeo, this.mats[c]);
     group.add(body);
     if (this.id === 'neon') group.add(new THREE.Mesh(this.frameGeo, this.frameMats[c]));
+    if (this.id === 'classic') {
+      const rim = new THREE.Mesh(this.bodyGeo, this.rimMats[c]);
+      rim.scale.setScalar(1.006);
+      const halo = new THREE.Sprite(this.haloMats[c]);
+      halo.scale.setScalar(NOTE_SIZE * 1.9);
+      halo.renderOrder = -1;
+      group.add(rim, halo);
+    }
     return { group, body };
   }
 
@@ -410,6 +431,80 @@ export class NoteStyle {
   dispose() {
     for (const d of this.disposables) d?.dispose?.();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Canvas textures: note halo, glowing arrow and dot
+
+function canvasTexture(w, h, draw) {
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  draw(c.getContext('2d'), w, h);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+let _glow = null;
+/** Soft rounded-square glow, white (tinted by the material colour). */
+export function glowTexture() {
+  if (!_glow) {
+    _glow = canvasTexture(128, 128, (ctx, w, h) => {
+      const g = ctx.createRadialGradient(w / 2, h / 2, w * 0.18, w / 2, h / 2, w * 0.5);
+      g.addColorStop(0, 'rgba(255,255,255,0.9)');
+      g.addColorStop(0.45, 'rgba(255,255,255,0.35)');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w, h);
+    });
+  }
+  return _glow;
+}
+
+// Arrow plane layout (fractions of the note size): a wide flat triangle whose base
+// sits near the edge and whose tip points toward the centre (= the cut direction, local -Y).
+export const ARROW_PLANE = { w: 0.86, h: 0.4, centerY: 0.305 };
+
+let _arrow = null;
+export function arrowTexture() {
+  if (!_arrow) {
+    _arrow = canvasTexture(256, 128, (ctx, w, h) => {
+      // base near the top of the canvas (= outer edge), tip toward the bottom (= centre / -Y)
+      const draw = () => {
+        ctx.beginPath();
+        ctx.moveTo(w * 0.1, h * 0.27);
+        ctx.lineTo(w * 0.9, h * 0.27);
+        ctx.lineTo(w * 0.5, h * 0.7);
+        ctx.closePath();
+        ctx.fill();
+      };
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(255,255,255,0.95)';
+      ctx.shadowBlur = 22;
+      draw();
+      ctx.shadowBlur = 8;
+      draw();
+    });
+  }
+  return _arrow;
+}
+
+let _dot = null;
+export function dotTexture() {
+  if (!_dot) {
+    _dot = canvasTexture(128, 128, (ctx, w, h) => {
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = 'rgba(255,255,255,0.95)';
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(w / 2, h / 2, w * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 6;
+      ctx.fill();
+    });
+  }
+  return _dot;
 }
 
 // ---------------------------------------------------------------------------

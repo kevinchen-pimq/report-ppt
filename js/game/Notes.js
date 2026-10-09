@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { NoteStyle, createEdgeGlowMaterial, wallStyleParams } from './Models.js';
+import { NoteStyle, createEdgeGlowMaterial, wallStyleParams, ARROW_PLANE, arrowTexture, dotTexture } from './Models.js';
 import {
   NOTE_SIZE, COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, WALL_UNIT, LANE_W,
   laneX, layerY, noteRotation, rotationToDir, getHeightOffset,
@@ -27,14 +27,9 @@ const _box = new THREE.Box3();
 
 function makeArrowGeometry() {
   const s = NOTE_SIZE;
-  const shape = new THREE.Shape();
-  // chevron pointing down (-Y)
-  shape.moveTo(-s * 0.36, s * 0.04);
-  shape.lineTo(s * 0.36, s * 0.04);
-  shape.lineTo(0, -s * 0.22);
-  shape.closePath();
-  const g = new THREE.ShapeGeometry(shape);
-  g.translate(0, -s * 0.08, s / 2 + 0.002);
+  const g = new THREE.PlaneGeometry(s * ARROW_PLANE.w, s * ARROW_PLANE.h);
+  // base near the +Y edge, tip toward the centre: the tip points along the cut direction (-Y)
+  g.translate(0, s * ARROW_PLANE.centerY, s / 2 + 0.003);
   return g;
 }
 
@@ -71,11 +66,14 @@ export class NoteManager {
     // Shared geometries & materials (note bodies come from the selected NoteStyle)
     this.style = new NoteStyle('classic');
     this.arrowGeo = makeArrowGeometry();
-    this.dotGeo = new THREE.CircleGeometry(NOTE_SIZE * 0.11, 16);
-    this.dotGeo.translate(0, 0, NOTE_SIZE / 2 + 0.002);
-    this.linkDotGeo = new THREE.CircleGeometry(NOTE_SIZE * 0.09, 12);
-    this.linkDotGeo.translate(0, 0, NOTE_SIZE / 2 + 0.002);
-    this.symbolMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    this.dotGeo = new THREE.PlaneGeometry(NOTE_SIZE * 0.55, NOTE_SIZE * 0.55);
+    this.dotGeo.translate(0, 0, NOTE_SIZE / 2 + 0.003);
+    this.linkDotGeo = new THREE.PlaneGeometry(NOTE_SIZE * 0.45, NOTE_SIZE * 0.45);
+    this.linkDotGeo.translate(0, 0, NOTE_SIZE / 2 + 0.003);
+    // glowing white symbols (additive so the halo brightens the face)
+    const symbol = (map) => new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
+    this.symbolMat = symbol(arrowTexture());
+    this.dotMat = symbol(dotTexture());
     this.bombGeo = new THREE.IcosahedronGeometry(0.2, 0);
     this.bombMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.3, metalness: 0.8, flatShading: true, emissive: 0x220008 });
     this.spikeGeo = new THREE.ConeGeometry(0.04, 0.16, 6);
@@ -184,14 +182,14 @@ export class NoteManager {
       const built = this.style.buildLink(color);
       group.add(built.group);
       obj.body = built.body;
-      obj.dot = new THREE.Mesh(this.linkDotGeo, this.symbolMat);
+      obj.dot = new THREE.Mesh(this.linkDotGeo, this.dotMat);
       group.add(obj.dot);
     } else {
       const built = this.style.buildNote(color);
       group.add(built.group);
       obj.body = built.body;
       obj.arrow = new THREE.Mesh(this.arrowGeo, this.symbolMat);
-      obj.dot = new THREE.Mesh(this.dotGeo, this.symbolMat);
+      obj.dot = new THREE.Mesh(this.dotGeo, this.dotMat);
       group.add(obj.arrow, obj.dot);
     }
     return obj;
