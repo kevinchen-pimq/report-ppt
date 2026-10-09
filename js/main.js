@@ -17,6 +17,7 @@ const game = new Game($('scene'), {
       if (game.current) selectEntry(game.current.entry, game.current.setIdx, game.current.diffIdx);
     },
     onError: (e) => status(`載入失敗：${e.message}`, { error: true }),
+    onModelsChanged: (names) => syncModelNames(names),
   },
 });
 
@@ -36,7 +37,8 @@ function status(msg, { error = false, sticky = false } = {}) {
 
 // ---------------------------------------------------------------------------
 // Settings (shared with the in-VR menu through the settings store)
-const CHECKS = ['noFail', 'autoplay', 'useMapColors'];
+const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'saberFlip'];
+const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle'];
 const RANGES_UI = {
   playerHeight: (v) => `${Number(v).toFixed(2)} m`,
   audioLatencyMs: (v) => `${v > 0 ? '+' : ''}${v} ms`,
@@ -51,7 +53,7 @@ function syncSettingsUI(v) {
     $(`opt-${k}`).value = v[k];
     $(`out-${k}`).textContent = fmt(v[k]);
   }
-  $('opt-spectator').value = v.spectator;
+  for (const k of SELECTS) $(`opt-${k}`).value = v[k];
   $('opt-leftColor').value = v.leftColor;
   $('opt-rightColor').value = v.rightColor;
 }
@@ -60,7 +62,38 @@ syncSettingsUI(settings.all);
 settings.subscribe((v) => syncSettingsUI(v));
 for (const k of CHECKS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.checked }));
 for (const k of Object.keys(RANGES_UI)) $(`opt-${k}`).addEventListener('input', (e) => settings.set({ [k]: Number(e.target.value) }));
-$('opt-spectator').addEventListener('change', (e) => settings.set({ spectator: e.target.value }));
+for (const k of SELECTS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.value }));
+
+// ---------------------------------------------------------------------------
+// Custom saber / note models (.glb), stored in IndexedDB by the game
+function syncModelNames(names) {
+  for (const kind of ['saber', 'note']) {
+    $(`name-${kind}`).textContent = names[kind] || '未上傳';
+    $(`rm-${kind}`).hidden = !names[kind];
+    $(`opt-${kind}Model`).querySelector('option[value="custom"]').disabled = !names[kind];
+  }
+}
+syncModelNames({ saber: null, note: null });
+for (const kind of ['saber', 'note']) {
+  $(`up-${kind}`).addEventListener('change', async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > 30 * 1024 * 1024) {
+      status('模型檔太大（上限 30 MB）', { error: true });
+      return;
+    }
+    try {
+      status(`正在載入模型 ${f.name}…`, { sticky: true });
+      await game.setCustomModel(kind, await f.arrayBuffer(), f.name);
+      status(`已套用自訂${kind === 'saber' ? '光劍' : '方塊'}：${f.name}`);
+    } catch (err) {
+      console.error(err);
+      status(`模型載入失敗：${err.message}（只支援 glTF 2.0 .glb）`, { error: true });
+    }
+  });
+  $(`rm-${kind}`).addEventListener('click', () => game.removeCustomModel(kind));
+}
 $('opt-leftColor').addEventListener('input', (e) => settings.set({ leftColor: e.target.value }));
 $('opt-rightColor').addEventListener('input', (e) => settings.set({ rightColor: e.target.value }));
 

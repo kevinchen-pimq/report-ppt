@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { NoteStyle, createEdgeGlowMaterial, wallStyleParams } from './Models.js';
 import {
   NOTE_SIZE, COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, WALL_UNIT, LANE_W,
   laneX, layerY, noteRotation, rotationToDir, getHeightOffset,
@@ -68,43 +68,57 @@ export class NoteManager {
 
     this.colors = [new THREE.Color(COLOR_LEFT), new THREE.Color(COLOR_RIGHT)];
 
-    // Shared geometries & materials
-    this.bodyGeo = new RoundedBoxGeometry(NOTE_SIZE, NOTE_SIZE, NOTE_SIZE, 3, 0.07);
-    this.linkGeo = new RoundedBoxGeometry(NOTE_SIZE, NOTE_SIZE * 0.28, NOTE_SIZE, 2, 0.04);
+    // Shared geometries & materials (note bodies come from the selected NoteStyle)
+    this.style = new NoteStyle('classic');
     this.arrowGeo = makeArrowGeometry();
     this.dotGeo = new THREE.CircleGeometry(NOTE_SIZE * 0.11, 16);
     this.dotGeo.translate(0, 0, NOTE_SIZE / 2 + 0.002);
-    this.linkDotGeo = new THREE.CircleGeometry(NOTE_SIZE * 0.08, 12);
-    this.linkDotGeo.rotateX(-Math.PI / 2);
-    this.linkDotGeo.translate(0, 0, 0);
-    this.bodyMats = this.colors.map(
-      (c) => new THREE.MeshStandardMaterial({ color: c, roughness: 0.35, metalness: 0.15, emissive: c, emissiveIntensity: 0.18 }),
-    );
+    this.linkDotGeo = new THREE.CircleGeometry(NOTE_SIZE * 0.09, 12);
+    this.linkDotGeo.translate(0, 0, NOTE_SIZE / 2 + 0.002);
     this.symbolMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     this.bombGeo = new THREE.IcosahedronGeometry(0.2, 0);
     this.bombMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.3, metalness: 0.8, flatShading: true, emissive: 0x220008 });
     this.spikeGeo = new THREE.ConeGeometry(0.04, 0.16, 6);
 
     this.wallGeo = new THREE.BoxGeometry(1, 1, 1);
-    this.wallEdgesGeo = new THREE.EdgesGeometry(this.wallGeo);
-    this.wallMat = new THREE.MeshBasicMaterial({ color: COLOR_WALL, transparent: true, opacity: 0.18, depthWrite: false, side: THREE.DoubleSide });
-    this.wallEdgeMat = new THREE.LineBasicMaterial({ color: COLOR_WALL });
+    this.wallMat = createEdgeGlowMaterial({ color: COLOR_WALL, ...wallStyleParams('translucent') });
 
-    this.pools = { note: [], bomb: [], link: [], wall: [] };
+    this.pools = { bomb: [], wall: [] }; // notes / links are pooled per colour: 'note0', 'link1', …
     this.active = [];
     this.activeWalls = [];
     this.reset(null);
   }
 
   setColors(left, right, obstacle = COLOR_WALL) {
-    this.wallMat.color.set(obstacle);
-    this.wallEdgeMat.color.set(obstacle);
+    this.wallMat.uniforms.color.value.set(obstacle);
     this.colors[0].set(left);
     this.colors[1].set(right);
-    this.bodyMats[0].color.copy(this.colors[0]);
-    this.bodyMats[0].emissive.copy(this.colors[0]);
-    this.bodyMats[1].color.copy(this.colors[1]);
-    this.bodyMats[1].emissive.copy(this.colors[1]);
+    this.style.setColors(this.colors[0], this.colors[1]);
+  }
+
+  /** Switches the note model; call while no notes are on screen. */
+  setNoteStyle(id, custom = null) {
+    const key = `${id}|${custom ? custom.uuid : ''}`;
+    if (key === this.styleKey) return;
+    this.styleKey = key;
+    for (const o of this.active) this.release(o);
+    this.active = [];
+    for (const k of Object.keys(this.pools)) if (k !== 'bomb' && k !== 'wall') delete this.pools[k];
+    this.style.dispose();
+    this.style = new NoteStyle(id, custom);
+    this.style.setColors(this.colors[0], this.colors[1]);
+  }
+
+  setWallStyle(style) {
+    const p = wallStyleParams(style);
+    const u = this.wallMat.uniforms;
+    u.fill.value = p.fill;
+    u.edge.value = p.edge;
+    u.intensity.value = p.intensity;
+  }
+
+  poolKey(kind, color) {
+    return kind === 'bomb' ? 'bomb' : `${kind}${color}`;
   }
 
   reset(map) {
@@ -127,13 +141,13 @@ export class NoteManager {
   // ----- object pools -------------------------------------------------------
   acquire(note) {
     const kind = note.kind;
-    const pool = this.pools[kind];
+    const key = this.poolKey(kind, note.color);
+    const pool = this.pools[key] || (this.pools[key] = []);
     let obj = pool.pop();
-    if (!obj) obj = this.createObject(kind);
-    if (kind !== 'bomb') {
-      obj.body.material = this.bodyMats[note.color];
-      obj.arrow.visible = kind === 'note' && note.dir !== 8;
-      obj.dot.visible = kind === 'note' && note.dir === 8;
+    if (!obj) obj = this.createObject(kind, note.color);
+    if (kind === 'note') {
+      obj.arrow.visible = note.dir !== 8;
+      obj.dot.visible = note.dir === 8;
     }
     obj.group.visible = true;
     obj.note = note;
@@ -151,9 +165,9 @@ export class NoteManager {
     return obj;
   }
 
-  createObject(kind) {
+  createObject(kind, color) {
     const group = new THREE.Group();
-    const obj = { kind, group };
+    const obj = { kind, group, key: this.poolKey(kind, color) };
     if (kind === 'bomb') {
       const body = new THREE.Mesh(this.bombGeo, this.bombMat);
       group.add(body);
@@ -167,20 +181,15 @@ export class NoteManager {
       }
       obj.body = body;
     } else if (kind === 'link') {
-      obj.body = new THREE.Mesh(this.linkGeo, this.bodyMats[0]);
-      group.add(obj.body);
-      obj.arrow = new THREE.Mesh(this.arrowGeo, this.symbolMat);
-      obj.arrow.visible = false;
-      obj.dot = new THREE.Mesh(this.dotGeo, this.symbolMat);
-      obj.dot.scale.set(0.8, 0.8, 1);
-      obj.dot.position.z = 0;
-      // dot on the front face of the flat link
-      obj.dot.geometry = new THREE.CircleGeometry(NOTE_SIZE * 0.09, 12);
-      obj.dot.geometry.translate(0, 0, NOTE_SIZE / 2 + 0.002);
+      const built = this.style.buildLink(color);
+      group.add(built.group);
+      obj.body = built.body;
+      obj.dot = new THREE.Mesh(this.linkDotGeo, this.symbolMat);
       group.add(obj.dot);
     } else {
-      obj.body = new THREE.Mesh(this.bodyGeo, this.bodyMats[0]);
-      group.add(obj.body);
+      const built = this.style.buildNote(color);
+      group.add(built.group);
+      obj.body = built.body;
       obj.arrow = new THREE.Mesh(this.arrowGeo, this.symbolMat);
       obj.dot = new THREE.Mesh(this.dotGeo, this.symbolMat);
       group.add(obj.arrow, obj.dot);
@@ -191,16 +200,14 @@ export class NoteManager {
   release(obj) {
     obj.group.visible = false;
     this.root.remove(obj.group);
-    this.pools[obj.kind].push(obj);
+    (this.pools[obj.key] || (this.pools[obj.key] = [])).push(obj);
   }
 
   acquireWall(wall) {
     let w = this.pools.wall.pop();
     if (!w) {
       const group = new THREE.Group();
-      const mesh = new THREE.Mesh(this.wallGeo, this.wallMat);
-      const edges = new THREE.LineSegments(this.wallEdgesGeo, this.wallEdgeMat);
-      group.add(mesh, edges);
+      group.add(new THREE.Mesh(this.wallGeo, this.wallMat));
       w = { group };
     }
     w.wall = wall;

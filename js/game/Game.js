@@ -12,6 +12,7 @@ import { Menu } from './Menu.js';
 import { Pointers } from './ui/Pointers.js';
 import { LatencyCalibrator } from './Calibration.js';
 import { settings } from '../settings.js';
+import { parseModel, modelStore } from './Models.js';
 import { COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, laneX, layerY, noteRotation, rotationToDir, setPlayerHeight } from './constants.js';
 
 const LEAD_IN = 2.0; // seconds before the song starts
@@ -99,8 +100,10 @@ export class Game {
     this.pointers = new Pointers(this);
     this.setupDesktopInput();
 
+    this.customModels = { saber: null, note: null, names: { saber: null, note: null } };
     this.applySettings(settings.all);
     settings.subscribe((s) => this.applySettings(s));
+    this.loadCustomModels();
 
     window.addEventListener('resize', () => this.onResize());
     renderer.setAnimationLoop((ts, frame) => this.loop(ts, frame));
@@ -119,6 +122,59 @@ export class Game {
       setPlayerHeight(s.playerHeight);
       this.applyColors();
     }
+    this.applyAppearance();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Appearance: saber / note models and wall style
+  applyAppearance(force = false) {
+    const s = this.settings;
+    this.notes.setWallStyle(s.wallStyle);
+    if (!force && (this.state === 'playing' || this.state === 'paused')) return; // applied at the next run
+    const saberCustom = s.saberModel === 'custom' ? this.customModels.saber : null;
+    const saberStyle = s.saberModel === 'custom' && !saberCustom ? 'classic' : s.saberModel;
+    for (const sb of this.sabers) sb.setStyle(saberStyle, saberCustom, s.saberFlip);
+    const noteCustom = s.noteModel === 'custom' ? this.customModels.note : null;
+    this.notes.setNoteStyle(s.noteModel === 'custom' && !noteCustom ? 'classic' : s.noteModel, noteCustom);
+    this.applyColors();
+    this.menu?.refreshPreview();
+  }
+
+  async loadCustomModels() {
+    for (const kind of ['saber', 'note']) {
+      const rec = await modelStore.get(kind);
+      if (!rec) continue;
+      try {
+        this.customModels[kind] = await parseModel(rec.data);
+        this.customModels.names[kind] = rec.name;
+      } catch (e) {
+        console.warn(`無法載入自訂${kind}模型`, e);
+      }
+    }
+    this.applyAppearance();
+    this.hooks.onModelsChanged?.(this.customModels.names);
+  }
+
+  /** Stores and activates an uploaded .glb model ('saber' | 'note'). */
+  async setCustomModel(kind, buffer, name) {
+    const scene = await parseModel(buffer);
+    await modelStore.put(kind, name, buffer);
+    this.customModels[kind] = scene;
+    this.customModels.names[kind] = name;
+    const key = kind === 'saber' ? 'saberModel' : 'noteModel';
+    if (settings.get(key) === 'custom') this.applyAppearance();
+    else settings.set({ [key]: 'custom' });
+    this.hooks.onModelsChanged?.(this.customModels.names);
+  }
+
+  async removeCustomModel(kind) {
+    await modelStore.remove(kind);
+    this.customModels[kind] = null;
+    this.customModels.names[kind] = null;
+    const key = kind === 'saber' ? 'saberModel' : 'noteModel';
+    if (settings.get(key) === 'custom') settings.set({ [key]: 'classic' });
+    else this.applyAppearance();
+    this.hooks.onModelsChanged?.(this.customModels.names);
   }
 
   /** Saber / note / light / wall colours: map colour scheme (if enabled) over the player's colours. */
@@ -262,7 +318,7 @@ export class Game {
 
   prepareRun() {
     setPlayerHeight(this.settings.playerHeight);
-    this.applyColors();
+    this.applyAppearance(true);
     this.audio.stop();
     this.notes.reset(this.map);
     this.arcs.reset(this.map);

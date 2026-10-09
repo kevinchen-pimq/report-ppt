@@ -118,6 +118,39 @@
           <label>左劍 <input type="color" id="opt-leftColor" /></label>
           <label>右劍 <input type="color" id="opt-rightColor" /></label>
         </div>
+        <h3>外觀</h3>
+        <label class="select">光劍模型
+          <select id="opt-saberModel">
+            <option value="classic">經典</option>
+            <option value="neon">霓虹</option>
+            <option value="katana">武士刀</option>
+            <option value="crystal">水晶</option>
+            <option value="custom">自訂模型（.glb）</option>
+          </select></label>
+        <div class="row model-row">
+          <label class="btn ghost small">上傳光劍 .glb<input id="up-saber" type="file" accept=".glb,.gltf,model/gltf-binary" hidden /></label>
+          <span id="name-saber" class="muted small-text">未上傳</span>
+          <button id="rm-saber" class="btn ghost small" type="button" hidden>移除</button>
+        </div>
+        <label class="check"><input type="checkbox" id="opt-saberFlip" /> 反轉自訂光劍方向（劍柄 / 劍尖顛倒時使用）</label>
+        <label class="select">方塊模型
+          <select id="opt-noteModel">
+            <option value="classic">經典圓角</option>
+            <option value="mech">機械方塊</option>
+            <option value="neon">霓虹框</option>
+            <option value="custom">自訂模型（.glb）</option>
+          </select></label>
+        <div class="row model-row">
+          <label class="btn ghost small">上傳方塊 .glb<input id="up-note" type="file" accept=".glb,.gltf,model/gltf-binary" hidden /></label>
+          <span id="name-note" class="muted small-text">未上傳</span>
+          <button id="rm-note" class="btn ghost small" type="button" hidden>移除</button>
+        </div>
+        <label class="select">牆壁
+          <select id="opt-wallStyle">
+            <option value="translucent">半透明</option>
+            <option value="edges">只顯示邊框</option>
+          </select></label>
+        <p class="muted small-text">自訂模型使用 glTF 2.0（.glb，需內嵌貼圖）。光劍：最長的軸當作劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。方塊：正面朝 +Z，自動縮放置中並套用方塊顏色（名稱含 arrow / white / metal 的材質保持原色）。</p>
         <details class="help">
           <summary>操作說明</summary>
           <ul>

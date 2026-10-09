@@ -234,3 +234,6 @@ html, body {
 .calib .row { margin-top: 0; }
 .calib .tap { flex: 1; }
 .calib .tap.flash { background: rgba(124, 156, 255, 0.6); }
+
+.model-row { margin-top: -4px; }
+.model-row .small-text { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -4,6 +4,7 @@ import { settings, RANGES } from '../settings.js';
 import { searchMaps, latestVersion } from '../beatsaver.js';
 import { diffName, defaultSetIndex, mapStats } from '../library.js';
 import { DIFF_NAMES } from '../mapLoader.js';
+import { SABER_STYLES, NOTE_STYLES, WALL_STYLES, buildSaberVisual } from './Models.js';
 
 const DIFF_COLORS = { Easy: '#4cdf8f', Normal: '#59b0f4', Hard: '#ff9d3a', Expert: '#ff4d5e', ExpertPlus: '#c46cff' };
 const SORTS = [
@@ -51,8 +52,54 @@ export class Menu {
     this.pulse.visible = false;
     this.panel.mesh.add(this.pulse);
 
+    // 3D preview of the selected saber / note / wall (shown on the appearance page)
+    this.preview = new THREE.Group();
+    this.preview.visible = false;
+    game.scene.add(this.preview);
+
     settings.subscribe(() => this.panel.invalidate());
     this.library.subscribe(() => this.panel.invalidate());
+  }
+
+  /** Rebuilds the appearance preview with the current styles. */
+  refreshPreview() {
+    const g = this.game;
+    for (const c of [...this.preview.children]) {
+      this.preview.remove(c);
+      if (c.userData.kind === 'saber') {
+        c.traverse((o) => {
+          if (o.isMesh) {
+            o.geometry.dispose();
+            for (const m of [].concat(o.material)) m.dispose();
+          }
+        });
+      }
+    }
+    const s = settings.all;
+    const saberCustom = s.saberModel === 'custom' ? g.customModels.saber : null;
+    for (let i = 0; i < 2; i++) {
+      const saber = buildSaberVisual(saberCustom || s.saberModel !== 'custom' ? s.saberModel : 'classic', g.sabers[i].color, saberCustom, s.saberFlip);
+      saber.group.position.set(-0.36 + i * 0.18, -0.35, 0);
+      saber.group.rotation.x = Math.PI / 2; // blade up
+      saber.group.scale.setScalar(0.75);
+      saber.group.userData.kind = 'saber';
+      this.preview.add(saber.group);
+    }
+    for (let c = 0; c < 2; c++) {
+      const note = g.notes.createObject('note', c);
+      note.arrow.visible = true;
+      note.dot.visible = false;
+      note.group.position.set(0.15 + c * 0.55, 0.3, 0);
+      note.group.rotation.z = c ? 0 : Math.PI;
+      note.group.userData.kind = 'note';
+      this.preview.add(note.group);
+    }
+    const wall = new THREE.Mesh(g.notes.wallGeo, g.notes.wallMat);
+    wall.scale.set(0.9, 0.55, 0.6);
+    wall.position.set(0.42, -0.3, 0);
+    wall.userData.kind = 'wall';
+    this.preview.add(wall);
+    this.previewSpin = this.previewSpin || 0;
   }
 
   get panels() {
@@ -113,6 +160,18 @@ export class Menu {
         }
       }
     } else this.pulse.visible = false;
+    const showPreview = this.visible && this.page === 'appearance';
+    this.preview.visible = showPreview;
+    if (showPreview) {
+      const pm = this.panel.mesh.position;
+      this.preview.position.set(pm.x + 1.6, pm.y + 0.1, pm.z + 0.5);
+      this.preview.rotation.y = -0.6;
+      this.previewSpin = (this.previewSpin || 0) + dt * 0.8;
+      for (const c of this.preview.children) {
+        if (c.userData.kind === 'saber') c.rotation.z = Math.sin(this.previewSpin) * 0.35;
+        else if (c.userData.kind === 'note') c.rotation.y = Math.sin(this.previewSpin * 0.7) * 0.6;
+      }
+    }
     this.panel.update();
   }
 
@@ -151,7 +210,7 @@ export class Menu {
     if (full) full.call(this, p);
     else {
       this.renderSidebar(p);
-      const fn = { library: this.renderLibrary, browse: this.renderBrowse, song: this.renderSong, settings: this.renderSettings, calibrate: this.renderCalibrate }[this.page];
+      const fn = { library: this.renderLibrary, browse: this.renderBrowse, song: this.renderSong, settings: this.renderSettings, appearance: this.renderAppearance, calibrate: this.renderCalibrate }[this.page];
       fn?.call(this, p);
     }
     if (this.status) {
@@ -170,14 +229,15 @@ export class Menu {
       ['library', `歌曲庫 (${this.library.entries.length})`],
       ['browse', 'BeatSaver'],
       ['settings', '設定'],
+      ['appearance', '外觀'],
       ['calibrate', '身高 / 延遲校正'],
     ];
     items.forEach(([page, label], i) => {
       const active = this.page === page || (page === 'library' && this.page === 'song');
-      p.button(`nav-${page}`, 24, 110 + i * 92, 240, 76, label, { active, size: 28, onClick: () => this.open(page) });
+      p.button(`nav-${page}`, 24, 100 + i * 86, 240, 72, label, { active, size: 28, onClick: () => this.open(page) });
     });
     if (this.game.mode === 'vr') {
-      p.button('nav-exit', 24, 110 + 4 * 92 + 40, 240, 70, '離開 VR', { size: 26, color: THEME.red, onClick: () => this.game.exitVR() });
+      p.button('nav-exit', 24, 100 + 5 * 86 + 30, 240, 66, '離開 VR', { size: 26, color: THEME.red, onClick: () => this.game.exitVR() });
     }
   }
 
@@ -488,6 +548,40 @@ export class Menu {
     this.stepperRow(p, 'set-latency', R, 380, '音訊延遲', 'audioLatencyMs', (v) => `${v > 0 ? '+' : ''}${v} ms`);
     this.stepperRow(p, 'set-height', R, 470, '身高', 'playerHeight', (v) => `${v.toFixed(2)} m`);
     p.button('set-go-cal', R, 575, 470, 70, '前往身高 / 延遲校正', { size: 26, onClick: () => this.open('calibrate') });
+  }
+
+  // ----- appearance -------------------------------------------------------------
+  chipRow(p, idPrefix, y, label, options, current, onPick, disabledFn = () => false) {
+    p.text(label, CX, y + 42, { size: 30, weight: 700 });
+    const w = Math.min(190, (CW - 160) / options.length - 10);
+    options.forEach(([value, text], i) => {
+      p.button(`${idPrefix}-${value}`, CX + 150 + i * (w + 10), y, w, 64, text, {
+        size: 24,
+        active: current === value,
+        disabled: disabledFn(value),
+        onClick: () => onPick(value),
+      });
+    });
+  }
+
+  renderAppearance(p) {
+    const g = this.game;
+    const s = settings.all;
+    const names = g.customModels.names;
+    p.text('外觀', CX, 75, { size: 44, weight: 800 });
+    p.text('右側為即時預覽', CX + 120, 75, { size: 24, color: THEME.muted });
+    this.chipRow(p, 'ap-saber', 110, '光劍', SABER_STYLES, s.saberModel, (v) => settings.set({ saberModel: v }), (v) => v === 'custom' && !g.customModels.saber);
+    if (names.saber) {
+      p.text(`自訂光劍：${names.saber}`, CX + 150, 210, { size: 22, color: THEME.muted, maxWidth: 520 });
+      p.button('ap-flip', CX + 690, 182, 290, 46, s.saberFlip ? '反轉方向：開' : '反轉方向：關', { size: 22, active: s.saberFlip, onClick: () => settings.set({ saberFlip: !s.saberFlip }) });
+    }
+    this.chipRow(p, 'ap-note', 260, '方塊', NOTE_STYLES, s.noteModel, (v) => settings.set({ noteModel: v }), (v) => v === 'custom' && !g.customModels.note);
+    if (names.note) p.text(`自訂方塊：${names.note}`, CX + 150, 360, { size: 22, color: THEME.muted, maxWidth: 520 });
+    this.chipRow(p, 'ap-wall', 410, '牆壁', WALL_STYLES, s.wallStyle, (v) => settings.set({ wallStyle: v }));
+    p.text('自訂模型：在網頁的「外觀」區上傳 glTF 2.0（.glb）檔，會保存在這個瀏覽器中。', CX, 545, { size: 24, color: THEME.muted, maxWidth: CW });
+    p.text('光劍：最長的軸會當成劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。', CX, 585, { size: 22, color: THEME.muted, maxWidth: CW });
+    p.text('方塊：模型正面朝 +Z，會自動縮放置中並套用方塊顏色。', CX, 620, { size: 22, color: THEME.muted, maxWidth: CW });
+    p.text('變更立即套用；遊戲中途變更則在下一首歌開始時生效', CX, 670, { size: 22, color: THEME.accent });
   }
 
   // ----- calibration ------------------------------------------------------------

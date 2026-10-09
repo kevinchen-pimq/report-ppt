@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { BLADE_LEN } from './constants.js';
+import { buildSaberVisual, BLADE_START } from './Models.js';
 
 const TRAIL_LEN = 9;
 const HISTORY_SEC = 0.5;
@@ -13,42 +14,9 @@ export class Saber {
     this.object.matrixAutoUpdate = false;
     this.active = true;
 
-    // Handle
-    const handle = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.018, 0.022, 0.2, 12),
-      new THREE.MeshStandardMaterial({ color: 0x222228, metalness: 0.7, roughness: 0.35 }),
-    );
-    handle.rotation.x = Math.PI / 2;
-    handle.position.z = 0.02;
-    this.object.add(handle);
-    const ring = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.024, 0.024, 0.02, 12),
-      new THREE.MeshBasicMaterial({ color: this.color }),
-    );
-    ring.rotation.x = Math.PI / 2;
-    ring.position.z = -0.08;
-    this.object.add(ring);
-
-    // Blade: white core + colored additive glow
-    const core = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.008, 0.008, BLADE_LEN, 8),
-      new THREE.MeshBasicMaterial({ color: 0xffffff }),
-    );
-    core.rotation.x = Math.PI / 2;
-    core.position.z = -0.08 - BLADE_LEN / 2;
-    this.object.add(core);
-    this.glowMat = new THREE.MeshBasicMaterial({
-      color: this.color,
-      transparent: true,
-      opacity: 0.55,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    const glow = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, BLADE_LEN, 10, 1, true), this.glowMat);
-    glow.rotation.x = Math.PI / 2;
-    glow.position.z = core.position.z;
-    this.object.add(glow);
-    this.bladeStart = -0.08;
+    this.bladeStart = BLADE_START;
+    this.style = null;
+    this.setStyle('classic');
 
     // Trail ribbon
     const positions = new Float32Array(TRAIL_LEN * 2 * 3);
@@ -96,10 +64,28 @@ export class Saber {
     this.active = v;
   }
 
+  /** Swaps the saber's look (see Models.js); custom = parsed glTF scene for 'custom'. */
+  setStyle(style, custom = null, flip = false) {
+    const key = `${style}|${custom ? custom.uuid : ''}|${flip}`;
+    if (key === this.styleKey) return;
+    this.styleKey = key;
+    if (this.visual) {
+      this.object.remove(this.visual.group);
+      this.visual.group.traverse((o) => {
+        if (o.isMesh) {
+          o.geometry.dispose();
+          for (const m of [].concat(o.material)) m.dispose();
+        }
+      });
+    }
+    this.style = style;
+    this.visual = buildSaberVisual(style, this.color, custom, flip);
+    this.object.add(this.visual.group);
+  }
+
   setColor(hex) {
     this.color.set(hex);
-    this.glowMat.color.copy(this.color);
-    this.object.children[1].material.color.copy(this.color);
+    this.visual.setColor(this.color);
   }
 
   /** Call once per frame after the pose has been set. */
