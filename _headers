@@ -11,3 +11,6 @@
 
 /css/*
   Cache-Control: public, max-age=300, must-revalidate
+
+/webxr-saber-source.zip
+  Cache-Control: no-cache
