@@ -53,6 +53,12 @@
 設定（網頁與 VR 選單共用並自動儲存）：不會失敗、自動遊玩、譜面自訂顏色、身高、音訊延遲、音量、打擊音效、
 光劍角度（光劍相對手把的傾斜）、光劍顏色、觀戰畫面。
 
+## 線上遊玩
+
+**https://webxr-saber.pages.dev**（Cloudflare Pages）
+
+用 Quest 瀏覽器開啟，按「進入 VR 選單」即可在 VR 中搜尋 BeatSaver 譜面遊玩。
+
 ## 執行
 
 WebXR 需要 **HTTPS**（或 `localhost`）。
@@ -69,6 +75,15 @@ python3 -m http.server 8000
 第一次玩建議先到「身高 / 延遲校正」測量身高與音訊延遲。
 
 PC VR 可使用 Chrome / Edge 搭配 SteamVR 或 Oculus Link。
+
+### 部署到 Cloudflare Pages
+
+```bash
+npx wrangler login            # 在容器 / SSH 環境用 npx wrangler login --device
+./scripts/deploy-pages.sh     # 上傳 index.html、css、js、vendor、_headers 到 webxr-saber 專案
+```
+
+`_headers` 設定了 vendor 檔案的快取與 WebXR 的 Permissions-Policy。
 
 ## 專案結構
 
