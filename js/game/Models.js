@@ -86,6 +86,53 @@ export function createEdgeGlowMaterial({ color = 0xffffff, fill = 0.15, edge = 0
   });
 }
 
+// ---------------------------------------------------------------------------
+// Silhouette outline ("inverted hull"): the mesh is pushed out along its normals
+// and only its back faces are drawn, so just a ring around the visible shape
+// remains, from any viewing angle. glow = soft band fading outward (additive).
+
+const HULL_VERT = /* glsl */ `
+  uniform float thickness;
+  varying float vFacing;
+  void main() {
+    vec3 p = position + normalize(normal) * thickness;
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    vec3 n = normalize(normalMatrix * normal);
+    // |n·v| is ~0 at the outer contour and grows toward the body: used to fade the glow outward
+    vFacing = abs(dot(n, normalize(-mv.xyz)));
+    gl_Position = projectionMatrix * mv;
+  }
+`;
+
+const HULL_FRAG = /* glsl */ `
+  uniform vec3 color;
+  uniform float opacity;
+  uniform float glow;
+  varying float vFacing;
+  void main() {
+    float a = glow > 0.5 ? opacity * pow(vFacing, 1.5) : opacity;
+    gl_FragColor = vec4(color, a);
+    #include <colorspace_fragment>
+  }
+`;
+
+export function createHullMaterial({ color = 0xffffff, thickness = 0.012, opacity = 1, glow = false } = {}) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      color: { value: new THREE.Color(color) },
+      thickness: { value: thickness },
+      opacity: { value: opacity },
+      glow: { value: glow ? 1 : 0 },
+    },
+    vertexShader: HULL_VERT,
+    fragmentShader: HULL_FRAG,
+    side: THREE.BackSide,
+    transparent: glow,
+    depthWrite: !glow,
+    blending: glow ? THREE.AdditiveBlending : THREE.NormalBlending,
+  });
+}
+
 /** Wall look: translucent fill with edges, or edges only. */
 export function wallStyleParams(style) {
   return style === 'edges' ? { fill: 0.0, edge: 0.045, intensity: 1.5 } : { fill: 0.26, edge: 0.03, intensity: 1.1 };
@@ -420,13 +467,10 @@ export class NoteStyle {
     // Outline: black body, thick glowing outline, symbols drawn in the note colour
     this.coloredSymbols = this.id === 'outline';
     if (this.id === 'outline') {
-      // real 3D edge tubes, so the outline reads correctly from any angle
-      this.rimGeo = edgeFrameGeometry(S, S, S, 0.07, 0.011);
-      this.rimGlowGeo = edgeFrameGeometry(S, S, S, 0.07, 0.026);
-      this.linkRimGeo = edgeFrameGeometry(S, S * 0.28, S, 0.04, 0.008);
-      this.disposables.push(this.rimGeo, this.rimGlowGeo, this.linkRimGeo);
-      this.rimMats = [0, 1].map((c) => this.track(c, new THREE.MeshBasicMaterial({ color: this.colors[c] }), 'basic'));
-      this.rimGlowMats = [0, 1].map((c) => this.track(c, additive(this.colors[c], 0.3), 'basic'));
+      // silhouette outline (inverted hull): only the outer contour is drawn, from any angle
+      this.hullMats = [0, 1].map((c) => this.track(c, createHullMaterial({ color: this.colors[c], thickness: 0.014 }), 'uniform'));
+      this.hullGlowMats = [0, 1].map((c) => this.track(c, createHullMaterial({ color: this.colors[c], thickness: 0.04, glow: true, opacity: 0.55 }), 'uniform'));
+      this.linkHullMats = [0, 1].map((c) => this.track(c, createHullMaterial({ color: this.colors[c], thickness: 0.01 }), 'uniform'));
       this.haloMats = [0, 1].map((c) => this.track(c, new THREE.SpriteMaterial({
         map: glowTexture(), color: this.colors[c], transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
       }), 'sprite'));
@@ -456,7 +500,7 @@ export class NoteStyle {
       return this.track(c, new THREE.MeshStandardMaterial({ color: col, metalness: 0.65, roughness: 0.28, emissive: col, emissiveIntensity: 0.12 }));
     }
     if (this.id === 'outline') {
-      const m = new THREE.MeshStandardMaterial({ color: 0x050508, metalness: 0.2, roughness: 0.55, emissive: col, emissiveIntensity: 0.03 });
+      const m = new THREE.MeshStandardMaterial({ color: 0x050508, metalness: 0.0, roughness: 0.95, emissive: col, emissiveIntensity: 0.03 });
       this.disposables.push(m);
       this.colorMats[c].push({ mat: m, kind: 'emissiveOnly' });
       return m;
@@ -508,7 +552,16 @@ export class NoteStyle {
     const body = new THREE.Mesh(this.bodyGeo, this.mats[c]);
     group.add(body);
     if (this.id === 'neon') group.add(new THREE.Mesh(this.frameGeo, this.frameMats[c]));
-    if (this.id === 'classic' || this.id === 'outline') {
+    if (this.id === 'outline') {
+      const hull = new THREE.Mesh(this.bodyGeo, this.hullMats[c]);
+      const glow = new THREE.Mesh(this.bodyGeo, this.hullGlowMats[c]);
+      glow.renderOrder = 1;
+      const halo = new THREE.Sprite(this.haloMats[c]);
+      halo.scale.setScalar(NOTE_SIZE * 1.9);
+      halo.renderOrder = -1;
+      group.add(hull, glow, halo);
+    }
+    if (this.id === 'classic') {
       const rim = new THREE.Mesh(this.rimGeo, this.rimMats[c]);
       const rimGlow = new THREE.Mesh(this.rimGlowGeo, this.rimGlowMats[c]);
       const halo = new THREE.Sprite(this.haloMats[c]);
@@ -525,7 +578,7 @@ export class NoteStyle {
     group.add(body);
     if (this.id === 'neon') group.add(new THREE.Mesh(this.linkFrameGeo, this.linkFrameMats[c]));
     if (this.id === 'outline') {
-      group.add(new THREE.Mesh(this.linkRimGeo, this.rimMats[c]));
+      group.add(new THREE.Mesh(this.linkGeo, this.linkHullMats[c]));
     }
     return { group, body };
   }
