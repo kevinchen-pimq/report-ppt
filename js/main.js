@@ -18,6 +18,7 @@ const game = new Game($('scene'), {
     },
     onError: (e) => status(`載入失敗：${e.message}`, { error: true }),
     onModelsChanged: (names) => syncModelNames(names),
+    onPreviewChange: (st) => syncPreviewButton(st),
   },
 });
 
@@ -250,12 +251,17 @@ $('lib-clear').addEventListener('click', async () => {
   $('song').hidden = true;
   $('song-empty').hidden = false;
   updateButtons();
+  game.stopPreview();
   await library.clearAll();
   forgetDeepLink(null);
   status('已清除全部歌曲');
 });
 
-library.onRemove = (entry) => forgetDeepLink(entry); // also covers deletes from the VR menu
+library.onRemove = (entry) => {
+  // also covers deletes from the VR menu
+  forgetDeepLink(entry);
+  if (game.previewState.entry === entry) game.stopPreview();
+};
 
 // Drop ?id=… from the address so a reload doesn't download a deleted song again
 function forgetDeepLink(entry) {
@@ -354,7 +360,19 @@ for (const chip of document.querySelectorAll('.chip[data-sort]')) {
 
 // ---------------------------------------------------------------------------
 // Song / difficulty selection
+// Song preview button on the song card
+function syncPreviewButton(st = game.previewState) {
+  const btn = $('preview-btn');
+  const mine = current && st.entry === current.entry;
+  btn.textContent = mine && st.loading ? '載入中…' : mine && st.playing ? '❚❚ 暫停' : '▶ 試聽';
+  btn.classList.toggle('playing', !!(mine && st.playing));
+}
+$('preview-btn').addEventListener('click', () => {
+  if (current) game.togglePreview(current.entry);
+});
+
 async function selectEntry(entry, setIdx, diffIdx) {
+  if (game.previewState.entry && game.previewState.entry !== entry) game.stopPreview();
   if (entry.stub) {
     // saved song: load its files from browser storage
     status(`讀取中：${entry.info.title}…`, { sticky: true });
@@ -376,6 +394,7 @@ async function selectEntry(entry, setIdx, diffIdx) {
   $('song-sub').textContent = info.subTitle;
   $('song-artist').textContent = info.artist;
   $('song-meta').textContent = `譜師 ${info.mapper || '-'} · BPM ${Math.round(info.bpm * 100) / 100} · 格式 v${info.version}`;
+  syncPreviewButton();
   renderSets();
 }
 

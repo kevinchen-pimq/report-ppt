@@ -200,8 +200,54 @@ export class Game {
     this.oneSaber = meta.characteristic === 'OneSaber';
   }
 
+  // ---------------------------------------------------------------------------
+  // Song preview (song pages on the web page and in the VR menu)
+  previewState = { entry: null, loading: false, playing: false };
+
+  isPreviewing(entry) {
+    return this.previewState.entry === entry && (this.previewState.playing || this.previewState.loading);
+  }
+
+  /** Play / pause the preview of a song. */
+  async togglePreview(entry) {
+    if (this.isPreviewing(entry)) {
+      this.stopPreview();
+      return;
+    }
+    this.stopPreview();
+    this.previewState = { entry, loading: true, playing: false };
+    this.emitPreview();
+    try {
+      await this.library.load(entry);
+      const buffer = await this.library.audioFor(entry, this.audio);
+      if (this.previewState.entry !== entry || !this.previewState.loading) return; // cancelled meanwhile
+      const info = entry.info;
+      const start = info.previewStart > 0 && info.previewStart < buffer.duration - 3 ? info.previewStart : buffer.duration * 0.3;
+      this.audio.playPreview(buffer, start, info.previewDuration > 3 ? info.previewDuration : 15);
+      this.previewState = { entry, loading: false, playing: true };
+    } catch (e) {
+      console.error(e);
+      this.previewState = { entry: null, loading: false, playing: false };
+      this.hooks.onError?.(e);
+    }
+    this.emitPreview();
+  }
+
+  stopPreview() {
+    if (!this.previewState.entry) return;
+    this.audio.stopPreview();
+    this.previewState = { entry: null, loading: false, playing: false };
+    this.emitPreview();
+  }
+
+  emitPreview() {
+    this.menu?.panel.invalidate();
+    this.hooks.onPreviewChange?.(this.previewState);
+  }
+
   /** Loads a library entry's difficulty and goes to the ready screen. */
   async playEntry(entry, setIdx, diffIdx) {
+    this.stopPreview();
     const prevState = this.state;
     this.state = 'loading';
     this.showPanel('loading');
@@ -231,6 +277,7 @@ export class Game {
   }
 
   async startVR(pending) {
+    this.stopPreview();
     if (!navigator.xr) throw new Error('此瀏覽器不支援 WebXR');
     this.audio.ensureContext();
     const session = await navigator.xr.requestSession('immersive-vr', {
@@ -267,6 +314,7 @@ export class Game {
 
   onSessionEnd() {
     this.xrSession = null;
+    this.stopPreview();
     this.spectator.stop();
     this.mode = 'desktop';
     this.resetDesktopCamera();

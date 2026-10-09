@@ -124,6 +124,42 @@ export class GameAudio {
     this.pausedAt = 0;
   }
 
+  /** Song preview on the song page: loops a section with short fades (uses the music volume). */
+  playPreview(buffer, start, length) {
+    const ctx = this.ensureContext();
+    this.stopPreview(0.05);
+    const s = Math.max(0, Math.min(start, buffer.duration - 2));
+    const e = Math.min(buffer.duration, s + length);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.loopStart = s;
+    src.loopEnd = e;
+    const g = ctx.createGain();
+    const t = ctx.currentTime;
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(1, t + 0.6);
+    src.connect(g);
+    g.connect(this.master);
+    src.start(t, s);
+    this.previewNode = { src, g };
+  }
+
+  stopPreview(fade = 0.3) {
+    const p = this.previewNode;
+    if (!p) return;
+    this.previewNode = null;
+    const t = this.ctx.currentTime;
+    p.g.gain.cancelScheduledValues(t);
+    p.g.gain.setValueAtTime(p.g.gain.value, t);
+    p.g.gain.linearRampToValueAtTime(0, t + fade);
+    try {
+      p.src.stop(t + fade + 0.02);
+    } catch (e) {
+      /* already stopped */
+    }
+  }
+
   stopSource() {
     if (this.source) {
       try {

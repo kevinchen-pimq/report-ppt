@@ -94,6 +94,7 @@ export function parseInfo(files) {
       audioDataFile: audio.audioDataFilename || null,
       coverFile: raw.coverImageFilename,
       previewStart: audio.previewStartTime || 0,
+      previewDuration: audio.previewDuration || 0,
       colorSchemes: (raw.colorSchemes || []).map(schemeV4),
       sets: [...sets.entries()].map(([characteristic, diffs]) => ({ characteristic, diffs })),
     };
@@ -109,6 +110,7 @@ export function parseInfo(files) {
       audioDataFile: null,
       coverFile: raw._coverImageFilename,
       previewStart: raw._previewStartTime || 0,
+      previewDuration: raw._previewDuration || 0,
       colorSchemes: (raw._colorSchemes || []).map(schemeV2),
       sets: (raw._difficultyBeatmapSets || []).map((set) => ({
         characteristic: set._beatmapCharacteristicName || 'Standard',

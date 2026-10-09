@@ -117,6 +117,7 @@ export class Menu {
 
   open(page) {
     if (page) this.page = page;
+    if (this.page !== 'song') this.game.stopPreview?.();
     if (this.page !== 'calibrate') this.stopCalibration();
     this.panel.show((p) => this.render(p));
   }
@@ -491,6 +492,14 @@ export class Menu {
     if (!e) return this.renderLibrary(p);
     const info = e.info;
     p.image(e.coverImage, CX, 40, 220, 220, 16);
+    // preview play / pause over the cover
+    const pv = this.game.previewState;
+    const mine = pv.entry === e;
+    p.button('song-preview', CX + 10, 196, 200, 56, mine && pv.loading ? '載入中…' : mine && pv.playing ? '❚❚ 暫停' : '▶ 試聽', {
+      size: 26,
+      active: mine && pv.playing,
+      onClick: () => this.game.togglePreview(e),
+    });
     const tx = CX + 250;
     p.text(info.title, tx, 95, { size: 46, weight: 800, maxWidth: CW - 260 });
     p.text(info.subTitle, tx, 140, { size: 28, color: THEME.muted, maxWidth: CW - 260 });
