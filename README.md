@@ -17,6 +17,8 @@
   - 匯入 BeatSaver 線上歌單：輸入歌單 ID 或網址，或搜尋 / 瀏覽熱門歌單（網頁與 VR 的「BeatSaver → 歌單」分頁）
   - 歌曲在點選時才下載，也可以「全部下載」；已下載的歌標示 ✓，不會重複下載
   - 歌單存在瀏覽器裡（IndexedDB），刪除歌單不會刪除已下載的歌
+  - BeatSaver 的歌單封面沒有開放跨網站使用（CORS），VR 選單透過網站上的小函式 `/bs-playlist-img/<id>.jpg`
+    代為取得（只允許 BeatSaver 歌單圖片）；用一般靜態伺服器執行時，改顯示歌單第一首歌的封面
 - **支援的譜面格式**
   - `Info.dat` v2.x、v4.x
   - 難度檔 v2（`_notes`）、v3（`colorNotes` / `burstSliders` / `sliders`）、v4（`colorNotesData` / `chains` / `arcs` / `njsEvents` / `AudioData.dat` BPM 區段 / `Lightshow.dat`）
@@ -109,6 +111,7 @@ npx wrangler login            # 在容器 / SSH 環境用 npx wrangler login --d
 ```
 
 `_headers` 設定了 vendor 檔案的快取與 WebXR 的 Permissions-Policy。
+`functions/` 是 Cloudflare Pages Functions（目前只有歌單封面轉接），部署時會一起上傳；本機要測試可用 `npx wrangler pages dev .`。
 
 ## 專案結構
 
@@ -137,6 +140,7 @@ js/game/Hud.js          分數 / 連擊 / 血量面板與訊息看板
 js/game/Effects.js      切割碎片與火花
 js/game/Spectator.js    VR 時電腦螢幕上的第三人稱 / 第一人稱觀戰畫面
 js/game/Audio.js        音樂播放時鐘與打擊音效
+functions/              Cloudflare Pages Function：BeatSaver 歌單封面轉接（加上 CORS）
 vendor/                 three.js、fflate（MIT，授權見 vendor/LICENSES.md）
 ```
 

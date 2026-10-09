@@ -198,13 +198,20 @@ export class Menu {
   }
 
   cover(url) {
-    // BeatSaver playlist images have no CORS header, so they can't go into a texture
-    if (!url || /\/playlist\/[^/]*\.\w+$|\/playlist\/512\//.test(url)) return null;
+    if (!url) return null;
+    // BeatSaver playlist images have no CORS header, so they can't go into a
+    // texture; our site's /bs-playlist-img function fetches them for us
+    const pl = /^https:\/\/[\w.]*beatsaver\.com\/playlist\/(?:\d+\/)?(\d+\.\w+)$/.exec(url);
+    if (pl) url = `bs-playlist-img/${pl[1]}`;
     let img = this.covers.get(url);
     if (!img) {
       img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => this.panel.invalidate();
+      img.onerror = () => {
+        img.failed = true;
+        this.panel.invalidate();
+      };
       img.src = url;
       this.covers.set(url, img);
       if (this.covers.size > 80) this.covers.delete(this.covers.keys().next().value);
@@ -527,7 +534,9 @@ export class Menu {
   }
 
   plCover(pl) {
-    return this.cover(pl.cover) || this.cover(pl.coverAlt);
+    // the playlist's own image, or (if it can't load) its first song's cover
+    const img = this.cover(pl.cover);
+    return img && !img.failed ? img : this.cover(pl.coverAlt);
   }
 
   renderPlaylists(p) {
