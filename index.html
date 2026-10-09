@@ -56,7 +56,9 @@
           <button class="chip" data-sort="Curated" type="button">精選</button>
         </div>
         <ul id="results" class="results"></ul>
-        <h3>已載入的歌曲</h3>
+        <h3>已存的歌曲 <span id="library-info" class="lib-info"></span></h3>
+        <p class="muted small-text lib-note">下載或載入的歌會存在這個瀏覽器裡，重新整理後仍在（上限 1 GB，滿了會刪最久沒玩的）。
+          <button id="lib-clear" class="btn ghost tiny" type="button" hidden>清除全部</button></p>
         <ul id="library" class="results small"><li class="muted">尚無</li></ul>
       </section>
 

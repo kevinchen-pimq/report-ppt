@@ -18,6 +18,11 @@ const ROWS = 5;
 const CX = 290; // content area left
 const CW = 985; // content area width
 
+export function fmtMB(bytes) {
+  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(bytes % 1073741824 ? 1 : 0)} GB`;
+  return `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`;
+}
+
 function fmtDuration(s) {
   s = Math.max(0, Math.round(s || 0));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
@@ -266,7 +271,7 @@ export class Menu {
   renderLibrary(p) {
     const list = this.library.entries;
     p.text('歌曲庫', CX, 75, { size: 44, weight: 800 });
-    p.text('最近載入的譜面（網頁上載入的也會出現在這裡）', CX + 170, 75, { size: 24, color: THEME.muted });
+    p.text(`已存在這個瀏覽器：${list.length} 首 · ${fmtMB(this.library.totalSize)} / ${fmtMB(this.library.limit)}`, CX + 170, 75, { size: 24, color: THEME.muted });
     if (!list.length) {
       p.text('還沒有歌曲', CX + CW / 2, 300, { size: 40, align: 'center', color: THEME.muted });
       p.text('到「BeatSaver」頁搜尋下載，或在網頁上載入 .zip / 資料夾', CX + CW / 2, 360, { size: 28, align: 'center', color: THEME.muted });
@@ -283,8 +288,29 @@ export class Menu {
       const y = 105 + i * 124;
       this.rowBg(p, `lib-${e.key}`, CX, y, rowW, 112, () => this.openSong(e));
       p.image(e.coverImage, CX + 8, y + 8, 96, 96);
-      p.text(e.info.title, CX + 124, y + 48, { size: 34, weight: 700, maxWidth: rowW - 140 });
-      p.text(`${e.info.artist} · 譜師 ${e.info.mapper || '-'}`, CX + 124, y + 88, { size: 24, color: THEME.muted, maxWidth: rowW - 140 });
+      p.text(e.info.title, CX + 124, y + 48, { size: 34, weight: 700, maxWidth: rowW - 330 });
+      p.text(`${e.info.artist} · 譜師 ${e.info.mapper || '-'}`, CX + 124, y + 88, { size: 24, color: THEME.muted, maxWidth: rowW - 330 });
+      p.text(e.cached ? fmtMB(e.size || 0) : '儲存中…', CX + rowW - 190, y + 64, { size: 22, color: THEME.muted, align: 'right' });
+      // delete: first press asks, second press deletes
+      const confirming = this.confirmDelete === e.key;
+      p.button(`lib-del-${e.key}`, CX + rowW - 170, y + 26, 156, 60, confirming ? '確定刪除' : '刪除', {
+        size: 22,
+        color: confirming ? THEME.red : THEME.muted,
+        onClick: () => {
+          if (!confirming) {
+            this.confirmDelete = e.key;
+            clearTimeout(this.confirmTimer);
+            this.confirmTimer = setTimeout(() => {
+              this.confirmDelete = null;
+              this.panel.invalidate();
+            }, 3000);
+            return;
+          }
+          this.confirmDelete = null;
+          this.library.remove(e);
+          this.setStatus(`已刪除：${e.info.title}`);
+        },
+      });
     }
     this.scrollButtons(p, 'lib', CX + rowW + 20, 105, ROWS * 124 - 12, this.libScroll, max, (v) => (this.libScroll = v));
   }
@@ -355,7 +381,9 @@ export class Menu {
         const y = top + i * 96;
         this.rowBg(p, `bs-${doc.id}`, CX, y, rowW, 88, () => this.downloadMap(doc));
         p.image(this.cover(v?.coverURL), CX + 8, y + 8, 72, 72, 10);
-        p.text(doc.name, CX + 96, y + 38, { size: 30, weight: 700, maxWidth: rowW - 120 });
+        const have = this.library.isDownloaded(doc);
+        p.text(doc.name, CX + 96, y + 38, { size: 30, weight: 700, maxWidth: rowW - (have ? 250 : 120) });
+        if (have) p.text('✓ 已下載', CX + rowW - 20, y + 38, { size: 24, color: THEME.green, align: 'right' });
         const diffs = [...new Set((v?.diffs || []).map((d) => DIFF_NAMES[d.difficulty] || d.difficulty))].join(' / ');
         const md = doc.metadata || {};
         const rating = doc.stats?.score ? ` · ${Math.round(doc.stats.score * 100)}%` : '';
@@ -426,6 +454,18 @@ export class Menu {
 
   // ----- song details -------------------------------------------------------------
   openSong(entry, setIdx, diffIdx) {
+    if (entry.stub) {
+      // saved song: load its files from browser storage first
+      this.setStatus(`讀取中：${entry.info.title}…`, true);
+      this.library
+        .load(entry)
+        .then(() => {
+          this.setStatus('');
+          this.openSong(entry, setIdx, diffIdx);
+        })
+        .catch((err) => this.setStatus(`讀取失敗：${err.message}`));
+      return;
+    }
     const s = this.song;
     s.entry = entry;
     s.setIdx = setIdx ?? defaultSetIndex(entry.info);

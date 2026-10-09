@@ -10,6 +10,8 @@
   - 選擇解壓縮後的譜面資料夾
   - 直接在 BeatSaver 搜尋、瀏覽高評分 / 最新 / 精選，或輸入譜面 ID（`!bsr` 代碼）
   - 網址參數：`?id=25f`（BeatSaver ID）或 `?url=<zip 網址>`
+  - **歌曲會存在瀏覽器裡**（IndexedDB，只在你自己的裝置上）：重新整理後仍在歌曲庫，已下載的 BeatSaver 譜面不會重複下載；
+    上限 1 GB，滿了會刪除最久沒玩的歌；網頁與 VR 歌曲庫都可以個別刪除或清除全部
 - **支援的譜面格式**
   - `Info.dat` v2.x、v4.x
   - 難度檔 v2（`_notes`）、v3（`colorNotes` / `burstSliders` / `sliders`）、v4（`colorNotesData` / `chains` / `arcs` / `njsEvents` / `AudioData.dat` BPM 區段 / `Lightshow.dat`）
@@ -105,7 +107,8 @@ index.html              選單介面
 css/style.css
 js/main.js              網頁介面、檔案載入、BeatSaver 整合
 js/settings.js          設定（網頁與 VR 共用，存在 localStorage）
-js/library.js           歌曲庫：載入、下載、解析難度、音樂解碼快取
+js/library.js           歌曲庫：載入、下載、解析難度、音樂解碼快取、只在記憶體保留最近的歌
+js/songCache.js         歌曲儲存（IndexedDB）：清單、讀取、刪除、容量上限
 js/mapLoader.js         zip / 資料夾讀取、Info.dat 解析（v2 / v4）、譜面自訂顏色
 js/beatmap.js           難度檔解析（v2 / v3 / v4）、BPM 時間換算、鏈與弧線、NJS 變速曲線、最高分計算
 js/beatsaver.js         BeatSaver API

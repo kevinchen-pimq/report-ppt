@@ -206,6 +206,7 @@ export class Game {
     this.state = 'loading';
     this.showPanel('loading');
     try {
+      await this.library.load(entry);
       const buffer = await this.library.audioFor(entry, this.audio);
       this.audio.buffer = buffer;
       const { map, meta } = this.library.loadDifficulty(entry, setIdx, diffIdx);

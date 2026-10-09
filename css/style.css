@@ -237,3 +237,10 @@ html, body {
 
 .model-row { margin-top: -4px; }
 .model-row .small-text { margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.lib-info { font-weight: 400; font-size: 13px; margin-left: 6px; }
+.lib-note { margin: -4px 0 6px; }
+.btn.tiny { padding: 2px 8px; font-size: 12px; margin-left: 6px; }
+.results li .r-size { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.results li .del { flex: none; border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+.results li .del:hover { border-color: var(--red); color: #ffb3bb; }

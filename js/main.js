@@ -147,7 +147,7 @@ $('cal-apply').addEventListener('click', () => {
 async function addAndSelect(promise, label) {
   try {
     const entry = await promise;
-    selectEntry(entry);
+    await selectEntry(entry);
     status(`已載入：${entry.info.title}${label ? `（${label}）` : ''}`);
     return entry;
   } catch (e) {
@@ -194,9 +194,13 @@ document.addEventListener('drop', async (e) => {
 
 // Library list
 library.subscribe(renderLibrary);
+const fmtMB = (b) => (b >= 1073741824 ? `${(b / 1073741824).toFixed(b % 1073741824 ? 1 : 0)} GB` : `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`);
+
 function renderLibrary() {
   const ul = $('library');
   ul.innerHTML = '';
+  $('library-info').textContent = library.entries.length ? `${library.entries.length} 首 · ${fmtMB(library.totalSize)} / ${fmtMB(library.limit)}` : '';
+  $('lib-clear').hidden = !library.entries.length;
   if (!library.entries.length) {
     ul.innerHTML = '<li class="muted">尚無</li>';
     return;
@@ -214,9 +218,56 @@ function renderLibrary() {
     m.className = 'r-meta';
     m.textContent = `${e.info.artist} · ${e.info.mapper || '-'}`;
     div.append(t, m);
-    li.append(img, div);
+    const size = document.createElement('span');
+    size.className = 'r-size';
+    size.textContent = e.cached ? fmtMB(e.size || 0) : '儲存中…';
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'del';
+    del.textContent = '刪除';
+    del.title = '從這個瀏覽器刪除';
+    del.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      if (!confirm(`刪除「${e.info.title}」？`)) return;
+      if (current?.entry === e) {
+        current = null;
+        $('song').hidden = true;
+        $('song-empty').hidden = false;
+        updateButtons();
+      }
+      await library.remove(e);
+      status(`已刪除：${e.info.title}`);
+    });
+    li.append(img, div, size, del);
     li.addEventListener('click', () => selectEntry(e));
     ul.append(li);
+  }
+}
+
+$('lib-clear').addEventListener('click', async () => {
+  if (!confirm(`刪除全部 ${library.entries.length} 首已存的歌曲？`)) return;
+  current = null;
+  $('song').hidden = true;
+  $('song-empty').hidden = false;
+  updateButtons();
+  await library.clearAll();
+  forgetDeepLink(null);
+  status('已清除全部歌曲');
+});
+
+library.onRemove = (entry) => forgetDeepLink(entry); // also covers deletes from the VR menu
+
+// Drop ?id=… from the address so a reload doesn't download a deleted song again
+function forgetDeepLink(entry) {
+  try {
+    const url = new URL(location.href);
+    const id = url.searchParams.get('id');
+    if (id && (!entry || entry.beatsaverId === id)) {
+      url.searchParams.delete('id');
+      history.replaceState(null, '', url);
+    }
+  } catch (err) {
+    /* ignore */
   }
 }
 
@@ -277,7 +328,7 @@ async function runSearch(query, sortOrder) {
       const diffs = [...new Set((v?.diffs || []).map((d) => DIFF_NAMES[d.difficulty] || d.difficulty))].join(' / ');
       const mins = Math.floor((m.metadata?.duration || 0) / 60);
       const secs = String((m.metadata?.duration || 0) % 60).padStart(2, '0');
-      meta.textContent = `${m.metadata?.songAuthorName || ''} · ${m.metadata?.levelAuthorName || ''} · ${mins}:${secs} · ${diffs}`;
+      meta.textContent = `${m.metadata?.songAuthorName || ''} · ${m.metadata?.levelAuthorName || ''} · ${mins}:${secs} · ${diffs}${library.isDownloaded(m) ? ' · ✓ 已下載' : ''}`;
       div.append(title, meta);
       li.append(img, div);
       li.addEventListener('click', () => loadBeatSaverMap(m).catch((e) => status(e.message, { error: true })));
@@ -303,7 +354,18 @@ for (const chip of document.querySelectorAll('.chip[data-sort]')) {
 
 // ---------------------------------------------------------------------------
 // Song / difficulty selection
-function selectEntry(entry, setIdx, diffIdx) {
+async function selectEntry(entry, setIdx, diffIdx) {
+  if (entry.stub) {
+    // saved song: load its files from browser storage
+    status(`讀取中：${entry.info.title}…`, { sticky: true });
+    try {
+      await library.load(entry);
+      status(`已載入：${entry.info.title}`);
+    } catch (e) {
+      status(`讀取失敗：${e.message}`, { error: true });
+      return;
+    }
+  }
   const info = entry.info;
   current = { entry, setIdx: setIdx ?? defaultSetIndex(info), diffIdx: 0, preview: null };
   current.diffIdx = diffIdx ?? info.sets[current.setIdx].diffs.length - 1;
@@ -440,6 +502,10 @@ let vrSupported = false;
     : '找不到 VR 裝置（需要 HTTPS 與支援 WebXR 的頭戴裝置）。仍可使用桌面預覽。';
   updateButtons();
 })();
+
+// ---------------------------------------------------------------------------
+// Songs saved in this browser
+await library.init();
 
 // ---------------------------------------------------------------------------
 // Deep links: ?id=<BeatSaver key> or ?url=<zip url>
