@@ -78,7 +78,7 @@
 
 ## 線上遊玩
 
-**https://xr-saber.pages.dev**（Cloudflare Pages）
+**https://xr-arcade.pages.dev**（Cloudflare Pages；舊網址 https://xr-saber.pages.dev 仍可使用）
 
 用 Quest 瀏覽器開啟，按「進入 VR 選單」即可在 VR 中搜尋 BeatSaver 譜面遊玩。
 
@@ -107,7 +107,8 @@ PC VR 可使用 Chrome / Edge 搭配 SteamVR 或 Oculus Link。
 
 ```bash
 npx wrangler login            # 在容器 / SSH 環境用 npx wrangler login --device
-./scripts/deploy-pages.sh     # 上傳 index.html、css、js、vendor、_headers 與原始碼 zip 到 xr-saber 專案
+./scripts/deploy-pages.sh     # 上傳 index.html、css、js、vendor、_headers 與原始碼 zip 到 xr-arcade 專案
+PAGES_PROJECT=xr-saber ./scripts/deploy-pages.sh   # 同時更新舊網址
 ```
 
 `_headers` 設定了 vendor 檔案的快取與 WebXR 的 Permissions-Policy。
