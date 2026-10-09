@@ -14,6 +14,7 @@ export const NOTE_STYLES = [
   ['classic', '經典圓角'],
   ['mech', '機械方塊'],
   ['neon', '霓虹框'],
+  ['outline', '外框'],
   ['custom', '自訂模型'],
 ];
 export const WALL_STYLES = [
@@ -46,6 +47,7 @@ const EDGE_FRAG = /* glsl */ `
   uniform float fill;
   uniform float edge;
   uniform float intensity;
+  uniform float whiten;
   uniform vec3 size;
   varying vec3 vPos;
   varying vec3 vNormal;
@@ -58,20 +60,21 @@ const EDGE_FRAG = /* glsl */ `
     float e = 1.0 - smoothstep(edge * 0.5, edge, m);
     float halo = (1.0 - smoothstep(edge, edge * 3.0, m)) * 0.22;
     float alpha = clamp(max(fill, e) + halo, 0.0, 1.0);
-    vec3 c = mix(color, vec3(1.0), e * 0.3) * intensity;
+    vec3 c = mix(color, vec3(1.0), e * whiten) * intensity;
     gl_FragColor = vec4(c, alpha);
     #include <colorspace_fragment>
   }
 `;
 
 /** size: the geometry's own dimensions (1,1,1 for a unit box). */
-export function createEdgeGlowMaterial({ color = 0xffffff, fill = 0.15, edge = 0.03, intensity = 1, size = [1, 1, 1] } = {}) {
+export function createEdgeGlowMaterial({ color = 0xffffff, fill = 0.15, edge = 0.03, intensity = 1, whiten = 0.3, size = [1, 1, 1] } = {}) {
   return new THREE.ShaderMaterial({
     uniforms: {
       color: { value: new THREE.Color(color) },
       fill: { value: fill },
       edge: { value: edge },
       intensity: { value: intensity },
+      whiten: { value: whiten },
       size: { value: new THREE.Vector3(...size) },
     },
     vertexShader: EDGE_VERT,
@@ -327,6 +330,9 @@ export class NoteStyle {
     if (this.id === 'mech') {
       this.bodyGeo = new RoundedBoxGeometry(S, S, S, 2, 0.015);
       this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 1, 0.012);
+    } else if (this.id === 'outline') {
+      this.bodyGeo = new RoundedBoxGeometry(S, S, S, 2, 0.03);
+      this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 2, 0.02);
     } else if (this.id === 'neon') {
       this.bodyGeo = new THREE.BoxGeometry(S * 0.96, S * 0.96, S * 0.96);
       this.frameGeo = new THREE.BoxGeometry(S, S, S);
@@ -342,6 +348,15 @@ export class NoteStyle {
     if (this.id === 'neon') {
       this.frameMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.05, edge: 0.03, intensity: 1.6, size: [S, S, S] }), 'uniform'));
       this.linkFrameMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.05, edge: 0.02, intensity: 1.6, size: [S, S * 0.28, S] }), 'uniform'));
+    }
+    // Outline: black body, thick glowing outline, symbols drawn in the note colour
+    this.coloredSymbols = this.id === 'outline';
+    if (this.id === 'outline') {
+      this.rimMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.0, edge: 0.032, intensity: 1.2, whiten: 0.04, size: [S, S, S] }), 'uniform'));
+      this.linkRimMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.0, edge: 0.022, intensity: 1.2, whiten: 0.04, size: [S, S * 0.28, S] }), 'uniform'));
+      this.haloMats = [0, 1].map((c) => this.track(c, new THREE.SpriteMaterial({
+        map: glowTexture(), color: this.colors[c], transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      }), 'sprite'));
     }
     if (this.id === 'classic') {
       this.rimMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.0, edge: 0.018, intensity: 1.25, size: [S, S, S] }), 'uniform'));
@@ -362,6 +377,12 @@ export class NoteStyle {
     const col = this.colors[c];
     if (this.id === 'mech') {
       return this.track(c, new THREE.MeshStandardMaterial({ color: col, metalness: 0.65, roughness: 0.28, emissive: col, emissiveIntensity: 0.12 }));
+    }
+    if (this.id === 'outline') {
+      const m = new THREE.MeshStandardMaterial({ color: 0x050508, metalness: 0.2, roughness: 0.55, emissive: col, emissiveIntensity: 0.03 });
+      this.disposables.push(m);
+      this.colorMats[c].push({ mat: m, kind: 'emissiveOnly' });
+      return m;
     }
     if (this.id === 'neon') {
       const m = new THREE.MeshStandardMaterial({ color: 0x0c0c14, metalness: 0.3, roughness: 0.4, emissive: col, emissiveIntensity: 0.08 });
@@ -409,7 +430,7 @@ export class NoteStyle {
     const body = new THREE.Mesh(this.bodyGeo, this.mats[c]);
     group.add(body);
     if (this.id === 'neon') group.add(new THREE.Mesh(this.frameGeo, this.frameMats[c]));
-    if (this.id === 'classic') {
+    if (this.id === 'classic' || this.id === 'outline') {
       const rim = new THREE.Mesh(this.bodyGeo, this.rimMats[c]);
       rim.scale.setScalar(1.006);
       const halo = new THREE.Sprite(this.haloMats[c]);
@@ -425,6 +446,11 @@ export class NoteStyle {
     const body = new THREE.Mesh(this.linkGeo, this.mats[c]);
     group.add(body);
     if (this.id === 'neon') group.add(new THREE.Mesh(this.linkFrameGeo, this.linkFrameMats[c]));
+    if (this.id === 'outline') {
+      const rim = new THREE.Mesh(this.linkGeo, this.linkRimMats[c]);
+      rim.scale.setScalar(1.01);
+      group.add(rim);
+    }
     return { group, body };
   }
 
@@ -471,11 +497,14 @@ export function arrowTexture() {
   if (!_arrow) {
     _arrow = canvasTexture(256, 128, (ctx, w, h) => {
       // base near the top of the canvas (= outer edge), tip toward the bottom (= centre / -Y)
+      // V-shaped chevron: flat outer edge, short sides, point toward the centre
       const draw = () => {
         ctx.beginPath();
-        ctx.moveTo(w * 0.1, h * 0.27);
-        ctx.lineTo(w * 0.9, h * 0.27);
-        ctx.lineTo(w * 0.5, h * 0.7);
+        ctx.moveTo(w * 0.1, h * 0.25);
+        ctx.lineTo(w * 0.9, h * 0.25);
+        ctx.lineTo(w * 0.9, h * 0.37);
+        ctx.lineTo(w * 0.5, h * 0.68);
+        ctx.lineTo(w * 0.1, h * 0.37);
         ctx.closePath();
         ctx.fill();
       };

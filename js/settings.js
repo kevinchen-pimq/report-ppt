@@ -17,7 +17,7 @@ export const DEFAULTS = {
   playerHeight: 1.8,
   spectator: null, // resolved at load time
   saberModel: 'classic', // classic | neon | katana | crystal | custom
-  noteModel: 'classic', // classic | mech | neon | custom
+  noteModel: 'classic', // classic | mech | neon | outline | custom
   wallStyle: 'translucent', // translucent | edges
   saberFlip: false, // reverse a custom saber model's direction
 };

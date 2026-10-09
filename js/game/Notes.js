@@ -24,6 +24,7 @@ const _vel = new THREE.Vector3();
 const _n = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
 const _box = new THREE.Box3();
+const _white = new THREE.Color(0xffffff);
 
 function makeArrowGeometry() {
   const s = NOTE_SIZE;
@@ -74,6 +75,9 @@ export class NoteManager {
     const symbol = (map) => new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
     this.symbolMat = symbol(arrowTexture());
     this.dotMat = symbol(dotTexture());
+    // per-colour symbols for styles that draw arrows in the note colour (outline)
+    this.colorArrowMats = [0, 1].map(() => symbol(arrowTexture()));
+    this.colorDotMats = [0, 1].map(() => symbol(dotTexture()));
     this.bombGeo = new THREE.IcosahedronGeometry(0.2, 0);
     this.bombMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.3, metalness: 0.8, flatShading: true, emissive: 0x220008 });
     this.spikeGeo = new THREE.ConeGeometry(0.04, 0.16, 6);
@@ -92,6 +96,11 @@ export class NoteManager {
     this.colors[0].set(left);
     this.colors[1].set(right);
     this.style.setColors(this.colors[0], this.colors[1]);
+    for (let c = 0; c < 2; c++) {
+      // saturated note colour (additive on the black face)
+      this.colorArrowMats[c].color.copy(this.colors[c]).lerp(_white, 0.04);
+      this.colorDotMats[c].color.copy(this.colorArrowMats[c].color);
+    }
   }
 
   /** Switches the note model; call while no notes are on screen. */
@@ -182,14 +191,15 @@ export class NoteManager {
       const built = this.style.buildLink(color);
       group.add(built.group);
       obj.body = built.body;
-      obj.dot = new THREE.Mesh(this.linkDotGeo, this.dotMat);
+      obj.dot = new THREE.Mesh(this.linkDotGeo, this.style.coloredSymbols ? this.colorDotMats[color] : this.dotMat);
       group.add(obj.dot);
     } else {
       const built = this.style.buildNote(color);
       group.add(built.group);
       obj.body = built.body;
-      obj.arrow = new THREE.Mesh(this.arrowGeo, this.symbolMat);
-      obj.dot = new THREE.Mesh(this.dotGeo, this.dotMat);
+      const colored = this.style.coloredSymbols;
+      obj.arrow = new THREE.Mesh(this.arrowGeo, colored ? this.colorArrowMats[color] : this.symbolMat);
+      obj.dot = new THREE.Mesh(this.dotGeo, colored ? this.colorDotMats[color] : this.dotMat);
       group.add(obj.arrow, obj.dot);
     }
     return obj;
