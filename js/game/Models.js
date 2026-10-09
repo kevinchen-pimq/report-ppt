@@ -1,6 +1,7 @@
 // Visual styles for sabers, notes and walls, plus user-supplied glTF/GLB models.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { NOTE_SIZE, BLADE_LEN } from './constants.js';
 
 export const SABER_STYLES = [
@@ -312,6 +313,73 @@ export function buildSaberVisual(style, color, custom = null, flip = false) {
 }
 
 // ---------------------------------------------------------------------------
+// Rounded-box edge frame: tubes along the 12 rounded edges (on the 45° line of each
+// edge's curve), joined over every corner by arcs on the corner sphere.
+
+const _WHITE = new THREE.Color(0xffffff);
+
+class SphereArc extends THREE.Curve {
+  constructor(center, from, to, radius) {
+    super();
+    this.center = center;
+    this.from = from;
+    this.to = to;
+    this.radius = radius;
+  }
+
+  getPoint(t, target = new THREE.Vector3()) {
+    return target.lerpVectors(this.from, this.to, t).normalize().multiplyScalar(this.radius).add(this.center);
+  }
+}
+
+export function edgeFrameGeometry(sx, sy, sz, r, thickness) {
+  const half = [sx / 2, sy / 2, sz / 2];
+  const parts = [];
+  const corners = new Map();
+  const vec = (arr) => new THREE.Vector3(arr[0], arr[1], arr[2]);
+  for (let a = 0; a < 3; a++) {
+    const b = (a + 1) % 3;
+    const c = (a + 2) % 3;
+    for (const sb of [-1, 1]) {
+      for (const sc of [-1, 1]) {
+        const ends = [-1, 1].map((sa) => {
+          const center = [0, 0, 0];
+          center[a] = sa * (half[a] - r);
+          center[b] = sb * (half[b] - r);
+          center[c] = sc * (half[c] - r);
+          const u = [0, 0, 0];
+          u[b] = sb * Math.SQRT1_2;
+          u[c] = sc * Math.SQRT1_2;
+          const d = [0, 0, 0];
+          d[a] = sa;
+          d[b] = sb;
+          d[c] = sc;
+          const dv = vec(d).normalize();
+          const cv = vec(center);
+          corners.set(d.join(','), cv.clone().addScaledVector(dv, r));
+          return { center: cv, u: vec(u), d: dv };
+        });
+        const [lo, hi] = ends;
+        const path = new THREE.CurvePath();
+        path.add(new SphereArc(lo.center, lo.d, lo.u, r));
+        path.add(new THREE.LineCurve3(lo.center.clone().addScaledVector(lo.u, r), hi.center.clone().addScaledVector(hi.u, r)));
+        path.add(new SphereArc(hi.center, hi.u, hi.d, r));
+        const tube = new THREE.TubeGeometry(path, 24, thickness, 8, false);
+        parts.push(tube);
+      }
+    }
+  }
+  for (const p of corners.values()) {
+    const sph = new THREE.SphereGeometry(thickness, 10, 8);
+    sph.translate(p.x, p.y, p.z);
+    parts.push(sph);
+  }
+  const merged = mergeGeometries(parts, false);
+  for (const g of parts) g.dispose();
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
 // Notes
 
 /**
@@ -352,14 +420,23 @@ export class NoteStyle {
     // Outline: black body, thick glowing outline, symbols drawn in the note colour
     this.coloredSymbols = this.id === 'outline';
     if (this.id === 'outline') {
-      this.rimMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.0, edge: 0.032, intensity: 1.2, whiten: 0.04, size: [S, S, S] }), 'uniform'));
-      this.linkRimMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.0, edge: 0.022, intensity: 1.2, whiten: 0.04, size: [S, S * 0.28, S] }), 'uniform'));
+      // real 3D edge tubes, so the outline reads correctly from any angle
+      this.rimGeo = edgeFrameGeometry(S, S, S, 0.07, 0.011);
+      this.rimGlowGeo = edgeFrameGeometry(S, S, S, 0.07, 0.026);
+      this.linkRimGeo = edgeFrameGeometry(S, S * 0.28, S, 0.04, 0.008);
+      this.disposables.push(this.rimGeo, this.rimGlowGeo, this.linkRimGeo);
+      this.rimMats = [0, 1].map((c) => this.track(c, new THREE.MeshBasicMaterial({ color: this.colors[c] }), 'basic'));
+      this.rimGlowMats = [0, 1].map((c) => this.track(c, additive(this.colors[c], 0.3), 'basic'));
       this.haloMats = [0, 1].map((c) => this.track(c, new THREE.SpriteMaterial({
         map: glowTexture(), color: this.colors[c], transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
       }), 'sprite'));
     }
     if (this.id === 'classic') {
-      this.rimMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.0, edge: 0.018, intensity: 1.25, size: [S, S, S] }), 'uniform'));
+      this.rimGeo = edgeFrameGeometry(S, S, S, 0.07, 0.0045);
+      this.rimGlowGeo = edgeFrameGeometry(S, S, S, 0.07, 0.014);
+      this.disposables.push(this.rimGeo, this.rimGlowGeo);
+      this.rimMats = [0, 1].map((c) => this.track(c, additive(this.colors[c], 0.85), 'light'));
+      this.rimGlowMats = [0, 1].map((c) => this.track(c, additive(this.colors[c], 0.22), 'basic'));
       this.haloMats = [0, 1].map((c) => this.track(c, new THREE.SpriteMaterial({
         map: glowTexture(), color: this.colors[c], transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
       }), 'sprite'));
@@ -401,7 +478,8 @@ export class NoteStyle {
       const col = this.colors[c];
       for (const { mat, kind } of this.colorMats[c]) {
         if (kind === 'uniform') mat.uniforms.color.value.copy(col);
-        else if (kind === 'sprite') mat.color.copy(col);
+        else if (kind === 'sprite' || kind === 'basic') mat.color.copy(col);
+        else if (kind === 'light') mat.color.copy(col).lerp(_WHITE, 0.45);
         else if (kind === 'dimmed') {
           mat.color.copy(col).multiplyScalar(0.72);
           mat.emissive.copy(col);
@@ -431,12 +509,12 @@ export class NoteStyle {
     group.add(body);
     if (this.id === 'neon') group.add(new THREE.Mesh(this.frameGeo, this.frameMats[c]));
     if (this.id === 'classic' || this.id === 'outline') {
-      const rim = new THREE.Mesh(this.bodyGeo, this.rimMats[c]);
-      rim.scale.setScalar(1.006);
+      const rim = new THREE.Mesh(this.rimGeo, this.rimMats[c]);
+      const rimGlow = new THREE.Mesh(this.rimGlowGeo, this.rimGlowMats[c]);
       const halo = new THREE.Sprite(this.haloMats[c]);
       halo.scale.setScalar(NOTE_SIZE * 1.9);
       halo.renderOrder = -1;
-      group.add(rim, halo);
+      group.add(rim, rimGlow, halo);
     }
     return { group, body };
   }
@@ -447,9 +525,7 @@ export class NoteStyle {
     group.add(body);
     if (this.id === 'neon') group.add(new THREE.Mesh(this.linkFrameGeo, this.linkFrameMats[c]));
     if (this.id === 'outline') {
-      const rim = new THREE.Mesh(this.linkGeo, this.linkRimMats[c]);
-      rim.scale.setScalar(1.01);
-      group.add(rim);
+      group.add(new THREE.Mesh(this.linkRimGeo, this.rimMats[c]));
     }
     return { group, body };
   }
