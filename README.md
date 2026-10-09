@@ -78,7 +78,9 @@
 
 ## 線上遊玩
 
-**https://xr-arcade.pages.dev**（Cloudflare Pages；舊網址 https://xr-saber.pages.dev 仍可使用）
+**https://xr-saber.pages.dev**（Cloudflare Pages）
+
+遊戲總覽：**https://xr-arcade.pages.dev**（`arcade/` 資料夾，列出所有遊戲）
 
 用 Quest 瀏覽器開啟，按「進入 VR 選單」即可在 VR 中搜尋 BeatSaver 譜面遊玩。
 
@@ -107,8 +109,8 @@ PC VR 可使用 Chrome / Edge 搭配 SteamVR 或 Oculus Link。
 
 ```bash
 npx wrangler login            # 在容器 / SSH 環境用 npx wrangler login --device
-./scripts/deploy-pages.sh     # 上傳 index.html、css、js、vendor、_headers 與原始碼 zip 到 xr-arcade 專案
-PAGES_PROJECT=xr-saber ./scripts/deploy-pages.sh   # 同時更新舊網址
+./scripts/deploy-pages.sh     # 遊戲：上傳 index.html、css、js、vendor、_headers、functions 與原始碼 zip 到 xr-saber 專案
+./scripts/deploy-arcade.sh    # 遊戲總覽：上傳 arcade/ 到 xr-arcade 專案
 ```
 
 `_headers` 設定了 vendor 檔案的快取與 WebXR 的 Permissions-Policy。
@@ -141,6 +143,7 @@ js/game/Hud.js          分數 / 連擊 / 血量面板與訊息看板
 js/game/Effects.js      切割碎片與火花
 js/game/Spectator.js    VR 時電腦螢幕上的第三人稱 / 第一人稱觀戰畫面
 js/game/Audio.js        音樂播放時鐘與打擊音效
+arcade/                 XR Arcade 遊戲總覽頁（獨立網站 xr-arcade.pages.dev）
 functions/              Cloudflare Pages Function：BeatSaver 歌單封面轉接（加上 CORS）
 vendor/                 three.js、fflate（MIT，授權見 vendor/LICENSES.md）
 ```
