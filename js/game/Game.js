@@ -34,9 +34,10 @@ const hex = (c) => (typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : c
  * States: idle (2D page) · menu (in-VR menu) · loading · ready · playing · paused · finished
  */
 export class Game {
-  constructor(container, { library, hooks = {} }) {
+  constructor(container, { library, playlists, hooks = {} }) {
     this.hooks = hooks; // { onExit(results) }
     this.library = library;
+    this.playlists = playlists;
     this.settings = settings.all;
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });

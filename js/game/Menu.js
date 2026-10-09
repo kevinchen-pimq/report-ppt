@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { UIPanel, THEME, roundRect } from './ui/UIPanel.js';
 import { settings, RANGES } from '../settings.js';
-import { searchMaps, latestVersion } from '../beatsaver.js';
+import { searchMaps, searchPlaylists, latestVersion } from '../beatsaver.js';
 import { diffName, defaultSetIndex, mapStats } from '../library.js';
 import { DIFF_NAMES } from '../mapLoader.js';
 import { SABER_STYLES, NOTE_STYLES, WALL_STYLES, buildSaberVisual } from './Models.js';
@@ -45,6 +45,7 @@ export class Menu {
     this.libScroll = 0;
     this.browse = { sort: 'Rating', query: '', page: 0, scroll: 0, results: [], loading: false, error: '', keyboard: false, loaded: false };
     this.song = { entry: null, setIdx: 0, diffIdx: 0, preview: null };
+    this.plv = { mode: 'list', pl: null, scroll: 0, listScroll: 0 };
     this.covers = new Map();
     this.headReadout = 0;
 
@@ -64,6 +65,7 @@ export class Menu {
 
     settings.subscribe(() => this.panel.invalidate());
     this.library.subscribe(() => this.panel.invalidate());
+    game.playlists?.subscribe(() => this.panel.invalidate());
   }
 
   /** Rebuilds the appearance preview with the current styles. */
@@ -196,7 +198,8 @@ export class Menu {
   }
 
   cover(url) {
-    if (!url) return null;
+    // BeatSaver playlist images have no CORS header, so they can't go into a texture
+    if (!url || /\/playlist\/[^/]*\.\w+$|\/playlist\/512\//.test(url)) return null;
     let img = this.covers.get(url);
     if (!img) {
       img = new Image();
@@ -216,7 +219,7 @@ export class Menu {
     if (full) full.call(this, p);
     else {
       this.renderSidebar(p);
-      const fn = { library: this.renderLibrary, browse: this.renderBrowse, song: this.renderSong, settings: this.renderSettings, appearance: this.renderAppearance, calibrate: this.renderCalibrate }[this.page];
+      const fn = { library: this.renderLibrary, playlists: this.renderPlaylists, browse: this.renderBrowse, song: this.renderSong, settings: this.renderSettings, appearance: this.renderAppearance, calibrate: this.renderCalibrate }[this.page];
       fn?.call(this, p);
     }
     if (this.status) {
@@ -233,6 +236,7 @@ export class Menu {
     p.text('Saber', 136, 68, { size: 34, weight: 900, color: '#59b0f4' });
     const items = [
       ['library', `歌曲庫 (${this.library.entries.length})`],
+      ['playlists', `歌單 (${this.game.playlists?.items.length || 0})`],
       ['browse', 'BeatSaver'],
       ['settings', '設定'],
       ['appearance', '外觀'],
@@ -240,10 +244,10 @@ export class Menu {
     ];
     items.forEach(([page, label], i) => {
       const active = this.page === page || (page === 'library' && this.page === 'song');
-      p.button(`nav-${page}`, 24, 100 + i * 86, 240, 72, label, { active, size: 28, onClick: () => this.open(page) });
+      p.button(`nav-${page}`, 24, 96 + i * 82, 240, 70, label, { active, size: 27, onClick: () => this.open(page) });
     });
     if (this.game.mode === 'vr') {
-      p.button('nav-exit', 24, 100 + 5 * 86 + 30, 240, 66, '離開 VR', { size: 26, color: THEME.red, onClick: () => this.game.exitVR() });
+      p.button('nav-exit', 24, 96 + 6 * 82 + 24, 240, 62, '離開 VR', { size: 26, color: THEME.red, onClick: () => this.game.exitVR() });
     }
   }
 
@@ -325,7 +329,9 @@ export class Menu {
     this.panel.invalidate();
     const token = (this.browseToken = {});
     try {
-      const docs = await searchMaps(b.query, b.page, b.query ? 'Relevance' : b.sort);
+      const docs = b.sort === 'playlists'
+        ? await searchPlaylists(b.query, b.page, b.query ? 'Relevance' : 'Rating')
+        : await searchMaps(b.query, b.page, b.query ? 'Relevance' : b.sort);
       if (token !== this.browseToken) return;
       b.results = docs;
       b.scroll = 0;
@@ -341,10 +347,10 @@ export class Menu {
     const b = this.browse;
     if (!b.loaded && !b.loading) this.loadBrowse();
     p.text('BeatSaver', CX, 75, { size: 44, weight: 800 });
-    SORTS.forEach(([key, label], i) => {
-      p.button(`sort-${key}`, CX + i * 170, 100, 156, 60, label, {
+    [...SORTS, ['playlists', '歌單']].forEach(([key, label], i) => {
+      p.button(`sort-${key}`, CX + i * 160, 100, 148, 60, label, {
         size: 26,
-        active: !b.query && b.sort === key,
+        active: key === 'playlists' ? b.sort === 'playlists' : !b.query && b.sort === key,
         onClick: () => {
           b.sort = key;
           b.query = '';
@@ -353,7 +359,7 @@ export class Menu {
         },
       });
     });
-    p.button('search-open', CX + 3 * 170, 100, CW - 3 * 170, 60, b.query ? `🔍 ${b.query}` : '🔍 搜尋（英數）…', {
+    p.button('search-open', CX + 4 * 160, 100, CW - 4 * 160, 60, b.query ? `🔍 ${b.query}` : b.sort === 'playlists' ? '🔍 搜尋歌單…' : '🔍 搜尋（英數）…', {
       size: 26,
       active: !!b.query,
       align: 'left',
@@ -378,8 +384,18 @@ export class Menu {
       for (let i = 0; i < ROWS; i++) {
         const doc = b.results[b.scroll + i];
         if (!doc) break;
-        const v = latestVersion(doc);
         const y = top + i * 96;
+        if (b.sort === 'playlists') {
+          // a BeatSaver playlist: import it and open it
+          this.rowBg(p, `bsp-${doc.playlistId}`, CX, y, rowW, 88, () => this.importPlaylist(doc.playlistId));
+          p.image(this.cover(doc.playlistImage), CX + 8, y + 8, 72, 72, 10);
+          const have = this.game.playlists?.items.some((x) => x.id === `bsp:${doc.playlistId}`);
+          p.text(doc.name, CX + 96, y + 38, { size: 30, weight: 700, maxWidth: rowW - (have ? 250 : 120) });
+          if (have) p.text('✓ 已匯入', CX + rowW - 20, y + 38, { size: 24, color: THEME.green, align: 'right' });
+          p.text(`${doc.owner?.name || ''} · ${doc.stats?.totalMaps ?? '?'} 首`, CX + 96, y + 72, { size: 22, color: THEME.muted, maxWidth: rowW - 120 });
+          continue;
+        }
+        const v = latestVersion(doc);
         this.rowBg(p, `bs-${doc.id}`, CX, y, rowW, 88, () => this.downloadMap(doc));
         p.image(this.cover(v?.coverURL), CX + 8, y + 8, 72, 72, 10);
         const have = this.library.isDownloaded(doc);
@@ -451,6 +467,160 @@ export class Menu {
       this.setStatus(`下載失敗：${e.message}`);
     }
     this.downloading = false;
+  }
+
+  // ----- playlists ------------------------------------------------------------------
+  async importPlaylist(id) {
+    try {
+      this.setStatus('匯入歌單中…', true);
+      const pl = await this.game.playlists.importBeatSaver(id);
+      this.setStatus(`已匯入歌單：${pl.title}（${pl.songs.length} 首）`);
+      this.openPlaylist(pl);
+    } catch (e) {
+      this.setStatus(`匯入失敗：${e.message}`);
+    }
+  }
+
+  openPlaylist(pl) {
+    const v = this.plv;
+    v.mode = 'detail';
+    v.pl = pl;
+    v.scroll = 0;
+    this.open('playlists');
+    this.game.playlists.resolve(pl).catch((e) => this.setStatus(`讀取歌單失敗：${e.message}`));
+  }
+
+  async playlistSong(song) {
+    if (this.downloading) return;
+    this.downloading = true;
+    let last = 0;
+    try {
+      const have = this.game.playlists.isDownloaded(song);
+      this.setStatus(have ? `讀取中：${song.name}…` : `下載中：${song.name}…`, true);
+      const entry = await this.game.playlists.getSong(song, (f) => {
+        const now = performance.now();
+        if (now - last > 200) {
+          last = now;
+          this.setStatus(`下載中：${song.name} ${Math.round(f * 100)}%`, true);
+        }
+      });
+      this.setStatus('');
+      this.openSong(entry);
+    } catch (e) {
+      this.setStatus(e.message);
+    }
+    this.downloading = false;
+  }
+
+  async downloadPlaylist(pl) {
+    if (this.downloading) return;
+    this.downloading = true;
+    try {
+      const r = await this.game.playlists.downloadAll(pl, (done, total, s) => {
+        this.setStatus(s ? `下載全部：${done + 1} / ${total} · ${s.name}` : '', true);
+      });
+      this.setStatus(r.total ? `已下載 ${r.downloaded} 首${r.failed ? `，${r.failed} 首失敗` : ''}` : '全部都已下載');
+    } catch (e) {
+      this.setStatus(`下載失敗：${e.message}`);
+    }
+    this.downloading = false;
+  }
+
+  plCover(pl) {
+    return this.cover(pl.cover) || this.cover(pl.coverAlt);
+  }
+
+  renderPlaylists(p) {
+    const store = this.game.playlists;
+    const v = this.plv;
+    if (v.mode === 'detail' && v.pl && store.items.some((x) => x.id === v.pl.id)) return this.renderPlaylistDetail(p, v.pl);
+    v.mode = 'list';
+    const list = store.items;
+    p.text('歌單', CX, 75, { size: 44, weight: 800 });
+    p.text('在網頁上傳 .bplist，或到「BeatSaver」頁的「歌單」分頁匯入', CX + 110, 75, { size: 24, color: THEME.muted });
+    if (!list.length) {
+      p.text('還沒有歌單', CX + CW / 2, 300, { size: 40, align: 'center', color: THEME.muted });
+      p.button('pl-go-browse', CX + CW / 2 - 200, 380, 400, 80, '瀏覽 BeatSaver 歌單', {
+        onClick: () => {
+          this.browse.sort = 'playlists';
+          this.browse.query = '';
+          this.browse.page = 0;
+          this.open('browse');
+          this.loadBrowse();
+        },
+      });
+      return;
+    }
+    const rowW = CW - 100;
+    const max = Math.max(0, list.length - ROWS);
+    v.listScroll = Math.min(v.listScroll, max);
+    p.area('pl-list', CX, 105, rowW, ROWS * 124, { onScroll: (d) => (v.listScroll = Math.max(0, Math.min(max, v.listScroll + d))) });
+    for (let i = 0; i < ROWS; i++) {
+      const pl = list[v.listScroll + i];
+      if (!pl) break;
+      const y = 105 + i * 124;
+      this.rowBg(p, `pl-${pl.id}`, CX, y, rowW, 112, () => this.openPlaylist(pl));
+      p.image(this.plCover(pl), CX + 8, y + 8, 96, 96);
+      p.text(pl.title, CX + 124, y + 48, { size: 34, weight: 700, maxWidth: rowW - 330 });
+      const got = pl.songs.filter((s) => store.isDownloaded(s)).length;
+      p.text(`${pl.author || (pl.source === 'bplist' ? '.bplist' : 'BeatSaver')} · ${pl.songs.length} 首 · 已下載 ${got}`, CX + 124, y + 88, { size: 24, color: THEME.muted, maxWidth: rowW - 330 });
+      const confirming = this.confirmDelete === pl.id;
+      p.button(`pl-del-${pl.id}`, CX + rowW - 170, y + 26, 156, 60, confirming ? '確定刪除' : '刪除歌單', {
+        size: 22,
+        color: confirming ? THEME.red : THEME.muted,
+        onClick: () => {
+          if (!confirming) {
+            this.confirmDelete = pl.id;
+            clearTimeout(this.confirmTimer);
+            this.confirmTimer = setTimeout(() => {
+              this.confirmDelete = null;
+              this.panel.invalidate();
+            }, 3000);
+            return;
+          }
+          this.confirmDelete = null;
+          store.remove(pl);
+          this.setStatus(`已刪除歌單：${pl.title}（已下載的歌仍保留在歌曲庫）`);
+        },
+      });
+    }
+    this.scrollButtons(p, 'pll', CX + rowW + 20, 105, ROWS * 124 - 12, v.listScroll, max, (val) => (v.listScroll = val));
+  }
+
+  renderPlaylistDetail(p, pl) {
+    const store = this.game.playlists;
+    const v = this.plv;
+    p.image(this.plCover(pl), CX, 30, 90, 90, 12);
+    p.text(pl.title, CX + 110, 72, { size: 38, weight: 800, maxWidth: CW - 520 });
+    const got = pl.songs.filter((s) => store.isDownloaded(s)).length;
+    p.text(`${pl.author ? `${pl.author} · ` : ''}${pl.songs.length} 首 · 已下載 ${got}`, CX + 110, 110, { size: 24, color: THEME.muted, maxWidth: CW - 520 });
+    p.button('pl-all', CX + CW - 400, 40, 230, 70, '全部下載', { size: 26, active: got < pl.songs.length, disabled: got >= pl.songs.length || this.downloading, onClick: () => this.downloadPlaylist(pl) });
+    p.button('pl-back', CX + CW - 160, 40, 160, 70, '返回', { size: 26, onClick: () => { v.mode = 'list'; this.panel.invalidate(); } });
+    const top = 140;
+    const rowW = CW - 100;
+    const max = Math.max(0, pl.songs.length - 6);
+    v.scroll = Math.min(v.scroll, max);
+    p.area('pl-songs', CX, top, rowW, 6 * 92, { onScroll: (d) => (v.scroll = Math.max(0, Math.min(max, v.scroll + d))) });
+    for (let i = 0; i < 6; i++) {
+      const s = pl.songs[v.scroll + i];
+      if (!s) break;
+      const y = top + i * 92;
+      const doc = store.docFor(s);
+      const missing = doc === null;
+      this.rowBg(p, `pls-${v.scroll + i}`, CX, y, rowW, 84, missing ? null : () => this.playlistSong(s));
+      const cover = doc ? latestVersion(doc)?.coverURL : null;
+      p.image(this.cover(cover), CX + 8, y + 8, 68, 68, 8);
+      p.text(`${v.scroll + i + 1}. ${doc?.name || s.name || s.hash}`, CX + 90, y + 36, { size: 28, weight: 700, color: missing ? THEME.muted : THEME.text, maxWidth: rowW - 260 });
+      p.text(doc ? `${doc.metadata?.songAuthorName || ''} · ${doc.metadata?.levelAuthorName || s.mapper || ''}` : missing ? 'BeatSaver 上找不到這首歌' : '讀取中…', CX + 90, y + 70, { size: 22, color: THEME.muted, maxWidth: rowW - 260 });
+      const status = missing ? '' : store.isDownloaded(s) ? '✓ 已下載' : '下載';
+      p.text(status, CX + rowW - 20, y + 52, { size: 24, color: store.isDownloaded(s) ? THEME.green : THEME.accent, align: 'right' });
+    }
+    // the song list scrolls by 6
+    if (max > 0) {
+      p.button('pls-up', CX + rowW + 20, top, 70, 70, '▲', { disabled: v.scroll <= 0, onClick: () => (v.scroll = Math.max(0, v.scroll - 6)) });
+      p.button('pls-down', CX + rowW + 20, top + 6 * 92 - 78, 70, 70, '▼', { disabled: v.scroll >= max, onClick: () => (v.scroll = Math.min(max, v.scroll + 6)) });
+      p.text(`${Math.min(v.scroll + 6, pl.songs.length)}/${pl.songs.length}`, CX + rowW + 55, top + 3 * 92, { size: 22, color: THEME.muted, align: 'center' });
+    }
   }
 
   // ----- song details -------------------------------------------------------------

@@ -97,6 +97,8 @@ export class Library {
     );
     entry.cached = true;
     entry.size = rec.size;
+    // keep memory bounded (e.g. while downloading a whole playlist)
+    this.unloadOthers(this.decoded?.entry || entry);
     await this.evict(entry);
     this.emit(entry);
   }
@@ -167,8 +169,9 @@ export class Library {
   }
 
   /** Downloads a BeatSaver map document (from search / id lookup); reuses a saved copy. */
-  async addBeatSaver(doc, onProgress) {
-    const v = latestVersion(doc);
+  async addBeatSaver(doc, onProgress, hash = null) {
+    // a playlist may pin a specific version (hash); otherwise use the latest
+    const v = (hash && doc.versions?.find((x) => x.hash === hash.toLowerCase())) || latestVersion(doc);
     if (!v) throw new Error('此譜面沒有可下載的版本');
     const existing = this.entries.find((e) => e.key === `bs:${v.hash}`);
     if (existing) return this.load(existing);

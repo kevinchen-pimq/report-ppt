@@ -3,7 +3,7 @@
 // listing; 'blobs' holds each song's zip archive, read only when the song is opened.
 
 const DB_NAME = 'webxr-saber-songs';
-const VERSION = 1;
+const VERSION = 2; // v2: + playlists
 export const CACHE_LIMIT = 1024 * 1024 * 1024; // 1 GB
 
 let dbPromise = null;
@@ -19,6 +19,7 @@ function openDb() {
         const db = req.result;
         if (!db.objectStoreNames.contains('index')) db.createObjectStore('index', { keyPath: 'key' });
         if (!db.objectStoreNames.contains('blobs')) db.createObjectStore('blobs');
+        if (!db.objectStoreNames.contains('playlists')) db.createObjectStore('playlists', { keyPath: 'id' });
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
@@ -105,6 +106,24 @@ export const songCache = {
       tx.objectStore('index').delete(key);
       tx.objectStore('blobs').delete(key);
     });
+  },
+
+  async listPlaylists() {
+    try {
+      const all = await run(['playlists'], 'readonly', (tx) => req2p(tx.objectStore('playlists').getAll()));
+      return (all || []).sort((a, b) => b.addedAt - a.addedAt);
+    } catch (e) {
+      return [];
+    }
+  },
+
+  putPlaylist(pl) {
+    askPersist();
+    return run(['playlists'], 'readwrite', (tx) => tx.objectStore('playlists').put(pl));
+  },
+
+  removePlaylist(id) {
+    return run(['playlists'], 'readwrite', (tx) => tx.objectStore('playlists').delete(id));
   },
 
   async clear() {

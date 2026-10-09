@@ -1,15 +1,18 @@
 import { Game } from './game/Game.js';
 import { settings } from './settings.js';
 import { Library, diffName, defaultSetIndex, mapStats } from './library.js';
-import { searchMaps, mapById, latestVersion, download } from './beatsaver.js';
+import { searchMaps, mapById, latestVersion, download, searchPlaylists, parsePlaylistId } from './beatsaver.js';
+import { Playlists } from './playlists.js';
 import { DIFF_NAMES } from './mapLoader.js';
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');
 const library = new Library();
+const playlists = new Playlists(library);
 
 const game = new Game($('scene'), {
   library,
+  playlists,
   hooks: {
     onExit: (results) => {
       menu.classList.remove('hidden');
@@ -187,7 +190,9 @@ for (const ev of ['dragleave', 'drop']) document.addEventListener(ev, () => drop
 document.addEventListener('drop', async (e) => {
   e.preventDefault();
   const f = e.dataTransfer.files[0];
-  if (f) {
+  if (f && /\.(bplist|json)$/i.test(f.name)) {
+    importBplistFiles([...e.dataTransfer.files]);
+  } else if (f) {
     status('正在解壓縮…', { sticky: true });
     await addAndSelect(f.arrayBuffer().then((b) => library.addZip(b, f.name)), f.name);
   }
@@ -359,6 +364,211 @@ for (const chip of document.querySelectorAll('.chip[data-sort]')) {
 }
 
 // ---------------------------------------------------------------------------
+// Playlists (.bplist files and BeatSaver playlists)
+let openPl = null; // playlist shown in the detail view
+let plBusy = false;
+
+function plItem({ cover, title, meta, state, stateOk, onClick, onDelete, missing }) {
+  const li = document.createElement('li');
+  if (missing) li.className = 'missing';
+  const img = document.createElement('img');
+  img.loading = 'lazy';
+  img.alt = '';
+  if (cover) img.src = cover;
+  const div = document.createElement('div');
+  const t = document.createElement('div');
+  t.className = 'r-title';
+  t.textContent = title;
+  const m = document.createElement('div');
+  m.className = 'r-meta';
+  m.textContent = meta;
+  div.append(t, m);
+  li.append(img, div);
+  if (state) {
+    const s = document.createElement('span');
+    s.className = `r-state${stateOk ? ' ok' : ''}`;
+    s.textContent = state;
+    li.append(s);
+  }
+  if (onDelete) {
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'del';
+    del.textContent = '刪除';
+    del.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      onDelete();
+    });
+    li.append(del);
+  }
+  if (onClick) li.addEventListener('click', onClick);
+  return li;
+}
+
+function renderPlaylists() {
+  const ul = $('playlists');
+  const items = playlists.items;
+  $('pl-info').textContent = items.length ? `${items.length} 個` : '';
+  if (openPl && !items.some((x) => x.id === openPl.id)) openPl = null;
+  $('pl-detail').hidden = !openPl;
+  ul.hidden = !!openPl;
+  if (openPl) return renderPlaylistDetail();
+  ul.innerHTML = '';
+  if (!items.length) {
+    ul.innerHTML = '<li class="muted">尚無歌單</li>';
+    return;
+  }
+  for (const pl of items) {
+    const got = pl.songs.filter((s) => playlists.isDownloaded(s)).length;
+    ul.append(plItem({
+      cover: pl.cover,
+      title: pl.title,
+      meta: `${pl.author || (pl.source === 'bplist' ? '.bplist' : 'BeatSaver')} · ${pl.songs.length} 首 · 已下載 ${got}`,
+      onClick: () => showPlaylist(pl),
+      onDelete: async () => {
+        if (!confirm(`刪除歌單「${pl.title}」？（已下載的歌會保留在「已存的歌曲」）`)) return;
+        await playlists.remove(pl);
+        status(`已刪除歌單：${pl.title}`);
+      },
+    }));
+  }
+}
+
+function renderPlaylistDetail() {
+  const pl = openPl;
+  const got = pl.songs.filter((s) => playlists.isDownloaded(s)).length;
+  $('pl-cover').src = pl.cover || '';
+  $('pl-title').textContent = pl.title;
+  $('pl-meta').textContent = `${pl.author ? `${pl.author} · ` : ''}${pl.songs.length} 首 · 已下載 ${got}`;
+  $('pl-all').disabled = plBusy || got >= pl.songs.length;
+  const ul = $('pl-songs');
+  const top = ul.scrollTop;
+  ul.innerHTML = '';
+  pl.songs.forEach((s, i) => {
+    const doc = playlists.docFor(s);
+    const have = playlists.isDownloaded(s);
+    const md = doc?.metadata || {};
+    ul.append(plItem({
+      cover: doc ? latestVersion(doc)?.coverURL : null,
+      title: `${i + 1}. ${doc?.name || s.name || s.hash}`,
+      meta: doc ? `${md.songAuthorName || ''} · ${md.levelAuthorName || s.mapper || ''}` : doc === null ? 'BeatSaver 上找不到這首歌' : '讀取中…',
+      state: doc === null ? '' : have ? '✓ 已下載' : '下載',
+      stateOk: have,
+      missing: doc === null,
+      onClick: doc === null ? null : () => playlistSong(s),
+    }));
+  });
+  ul.scrollTop = top;
+}
+
+function showPlaylist(pl) {
+  openPl = pl;
+  $('pl-songs').scrollTop = 0;
+  renderPlaylists();
+  playlists.resolve(pl).catch((e) => status(`讀取歌單失敗：${e.message}`, { error: true }));
+}
+
+async function playlistSong(s) {
+  if (plBusy) return;
+  plBusy = true;
+  const name = s.name || s.hash;
+  try {
+    if (!playlists.isDownloaded(s)) status(`下載中：${name}…`, { sticky: true });
+    const entry = await playlists.getSong(s, (p) => status(`下載中：${name} ${Math.round(p * 100)}%`, { sticky: true }));
+    await selectEntry(entry);
+    status(`已載入：${entry.info.title}`);
+    $('song-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    status(e.message, { error: true });
+  }
+  plBusy = false;
+  renderPlaylists();
+}
+
+$('pl-all').addEventListener('click', async () => {
+  if (!openPl || plBusy) return;
+  plBusy = true;
+  renderPlaylists();
+  try {
+    const r = await playlists.downloadAll(openPl, (done, total, s) => {
+      if (s) status(`全部下載：${done + 1} / ${total} · ${s.name || s.hash}`, { sticky: true });
+    });
+    status(r.total ? `已下載 ${r.downloaded} 首${r.failed ? `，${r.failed} 首失敗` : ''}` : '全部都已下載', { error: !!r.failed });
+  } catch (e) {
+    status(`下載失敗：${e.message}`, { error: true });
+  }
+  plBusy = false;
+  renderPlaylists();
+});
+$('pl-back').addEventListener('click', () => {
+  openPl = null;
+  renderPlaylists();
+});
+
+async function importBplistFiles(files) {
+  let last = null;
+  for (const f of files) {
+    try {
+      last = await playlists.importBplist(await f.text(), f.name);
+      status(`已匯入歌單：${last.title}（${last.songs.length} 首）`);
+    } catch (e) {
+      status(`${f.name}：${e.message}`, { error: true });
+    }
+  }
+  if (last) showPlaylist(last);
+}
+$('file-bplist').addEventListener('change', (e) => {
+  importBplistFiles([...e.target.files]);
+  e.target.value = '';
+});
+
+async function importBeatSaverPlaylist(id) {
+  try {
+    status('匯入歌單中…', { sticky: true });
+    const pl = await playlists.importBeatSaver(id);
+    status(`已匯入歌單：${pl.title}（${pl.songs.length} 首）`);
+    showPlaylist(pl);
+  } catch (e) {
+    status(`匯入失敗：${e.message}`, { error: true });
+  }
+}
+$('pl-id-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const id = parsePlaylistId($('pl-id').value);
+  if (!id) return status('請輸入歌單 ID（數字）或 BeatSaver 歌單網址', { error: true });
+  importBeatSaverPlaylist(id);
+});
+
+$('pl-search-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('pl-search').value.trim();
+  const ul = $('pl-results');
+  ul.hidden = false;
+  ul.innerHTML = '<li class="muted">搜尋中…</li>';
+  try {
+    const docs = await searchPlaylists(q, 0, q ? 'Relevance' : 'Rating');
+    ul.innerHTML = docs.length ? '' : '<li class="muted">沒有結果</li>';
+    for (const d of docs) {
+      const have = playlists.items.some((x) => x.id === `bsp:${d.playlistId}`);
+      ul.append(plItem({
+        cover: d.playlistImage,
+        title: d.name,
+        meta: `${d.owner?.name || ''} · ${d.stats?.totalMaps ?? '?'} 首`,
+        state: have ? '✓ 已匯入' : '匯入',
+        stateOk: have,
+        onClick: () => importBeatSaverPlaylist(d.playlistId),
+      }));
+    }
+  } catch (err) {
+    ul.innerHTML = '';
+    status(err.message, { error: true });
+  }
+});
+
+playlists.subscribe(renderPlaylists);
+library.subscribe(renderPlaylists);
+
+// ---------------------------------------------------------------------------
 // Song / difficulty selection
 // Song preview button on the song card
 function syncPreviewButton(st = game.previewState) {
@@ -525,6 +735,7 @@ let vrSupported = false;
 // ---------------------------------------------------------------------------
 // Songs saved in this browser
 await library.init();
+await playlists.init();
 
 // ---------------------------------------------------------------------------
 // Deep links: ?id=<BeatSaver key> or ?url=<zip url>
@@ -548,3 +759,4 @@ document.querySelector('.chip[data-sort="Rating"]').classList.add('active');
 
 window.__game = game;
 window.__library = library;
+window.__playlists = playlists;

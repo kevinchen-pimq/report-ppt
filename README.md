@@ -12,6 +12,11 @@
   - 網址參數：`?id=25f`（BeatSaver ID）或 `?url=<zip 網址>`
   - **歌曲會存在瀏覽器裡**（IndexedDB，只在你自己的裝置上）：重新整理後仍在歌曲庫，已下載的 BeatSaver 譜面不會重複下載；
     上限 1 GB，滿了會刪除最久沒玩的歌；網頁與 VR 歌曲庫都可以個別刪除或清除全部
+- **歌單（Playlist）**
+  - 上傳 Beat Saver 的 `.bplist` 歌單檔（也可直接拖放到網頁）
+  - 匯入 BeatSaver 線上歌單：輸入歌單 ID 或網址，或搜尋 / 瀏覽熱門歌單（網頁與 VR 的「BeatSaver → 歌單」分頁）
+  - 歌曲在點選時才下載，也可以「全部下載」；已下載的歌標示 ✓，不會重複下載
+  - 歌單存在瀏覽器裡（IndexedDB），刪除歌單不會刪除已下載的歌
 - **支援的譜面格式**
   - `Info.dat` v2.x、v4.x
   - 難度檔 v2（`_notes`）、v3（`colorNotes` / `burstSliders` / `sliders`）、v4（`colorNotesData` / `chains` / `arcs` / `njsEvents` / `AudioData.dat` BPM 區段 / `Lightshow.dat`）
@@ -30,6 +35,7 @@
   - 結算畫面（等級 SS～E、百分比、最大連擊）
 - **VR 內選單**（控制器雷射指向 + 扳機點選，搖桿捲動）
   - 歌曲庫：網頁上載入或 VR 中下載的歌曲
+  - 歌單：已匯入的歌單、歌曲清單、單首下載或全部下載
   - BeatSaver：高評分 / 最新 / 精選、虛擬鍵盤搜尋、直接下載
   - 歌曲頁：選擇譜面特性與難度，顯示方塊數、NJS、變速事件、自訂顏色；可試聽（播放 / 暫停，循環播放譜面設定的試聽段落）
   - 設定、開始前 / 暫停 / 結算畫面（暫停中可直接調整延遲與音量）、本機最佳成績
@@ -74,6 +80,10 @@
 
 用 Quest 瀏覽器開啟，按「進入 VR 選單」即可在 VR 中搜尋 BeatSaver 譜面遊玩。
 
+## 原始碼
+
+網頁最下方有「下載原始碼 (.zip)」連結（部署時用 `git archive` 打包），也可以直接從 GitHub 取得。
+
 ## 執行
 
 WebXR 需要 **HTTPS**（或 `localhost`）。
@@ -95,7 +105,7 @@ PC VR 可使用 Chrome / Edge 搭配 SteamVR 或 Oculus Link。
 
 ```bash
 npx wrangler login            # 在容器 / SSH 環境用 npx wrangler login --device
-./scripts/deploy-pages.sh     # 上傳 index.html、css、js、vendor、_headers 到 xr-saber 專案
+./scripts/deploy-pages.sh     # 上傳 index.html、css、js、vendor、_headers 與原始碼 zip 到 xr-saber 專案
 ```
 
 `_headers` 設定了 vendor 檔案的快取與 WebXR 的 Permissions-Policy。
@@ -108,14 +118,15 @@ css/style.css
 js/main.js              網頁介面、檔案載入、BeatSaver 整合
 js/settings.js          設定（網頁與 VR 共用，存在 localStorage）
 js/library.js           歌曲庫：載入、下載、解析難度、音樂解碼快取、只在記憶體保留最近的歌
-js/songCache.js         歌曲儲存（IndexedDB）：清單、讀取、刪除、容量上限
+js/songCache.js         歌曲與歌單儲存（IndexedDB）：清單、讀取、刪除、容量上限
+js/playlists.js         歌單：.bplist 解析、BeatSaver 歌單匯入、單首 / 全部下載
 js/mapLoader.js         zip / 資料夾讀取、Info.dat 解析（v2 / v4）、譜面自訂顏色
 js/beatmap.js           難度檔解析（v2 / v3 / v4）、BPM 時間換算、鏈與弧線、NJS 變速曲線、最高分計算
 js/beatsaver.js         BeatSaver API
 js/game/Game.js         遊戲主迴圈、WebXR session、控制器、桌面輸入、自動遊玩
 js/game/Notes.js        方塊 / 炸彈 / 鏈 / 牆的生成、移動、碰撞與切割判定
 js/game/Arcs.js         弧線的繪製與震動回饋
-js/game/Menu.js         VR 選單各頁面（歌曲庫、BeatSaver、設定、校正、開始 / 暫停 / 結算）
+js/game/Menu.js         VR 選單各頁面（歌曲庫、歌單、BeatSaver、設定、校正、開始 / 暫停 / 結算）
 js/game/ui/             Canvas 面板元件與控制器雷射指標
 js/game/Calibration.js  音訊延遲節拍測試
 js/game/Saber.js        光劍、軌跡、速度與揮劍角度追蹤

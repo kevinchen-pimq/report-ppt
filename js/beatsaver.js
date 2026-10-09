@@ -18,6 +18,59 @@ export async function mapById(id) {
   return res.json();
 }
 
+// ---------------------------------------------------------------------------
+// Playlists
+
+export async function searchPlaylists(query, page = 0, sortOrder = 'Relevance') {
+  const params = new URLSearchParams({ sortOrder });
+  if (query) params.set('q', query);
+  const res = await fetch(`${API}/playlists/search/${page}?${params}`);
+  if (!res.ok) throw new Error(`BeatSaver 歌單搜尋失敗 (${res.status})`);
+  return (await res.json()).docs || [];
+}
+
+/** Playlist id from "123", a playlist page URL or an API URL. */
+export function parsePlaylistId(text) {
+  const m = String(text).trim().match(/(?:playlists\/(?:id\/)?)?(\d+)\D*$/);
+  return m ? m[1] : null;
+}
+
+/** A BeatSaver playlist with all its maps: { playlist, maps: [mapDoc] }. */
+export async function fetchPlaylist(id) {
+  let playlist = null;
+  const maps = [];
+  for (let page = 0; page < 50; page++) {
+    const res = await fetch(`${API}/playlists/id/${encodeURIComponent(id)}/${page}`);
+    if (res.status === 404) throw new Error(`找不到 BeatSaver 歌單 ${id}`);
+    if (!res.ok) throw new Error(`讀取歌單失敗 (${res.status})`);
+    const data = await res.json();
+    playlist = playlist || data.playlist;
+    const batch = (data.maps || []).map((m) => m.map).filter(Boolean);
+    maps.push(...batch);
+    if (!batch.length || batch.length < 20) break;
+  }
+  return { playlist, maps };
+}
+
+/** Looks up maps by hash (50 per request). Returns Map(hash -> doc). */
+export async function mapsByHashes(hashes) {
+  const out = new Map();
+  const list = [...new Set(hashes.map((h) => h.toLowerCase()))];
+  for (let i = 0; i < list.length; i += 50) {
+    const chunk = list.slice(i, i + 50);
+    const res = await fetch(`${API}/maps/hash/${chunk.join(',')}`);
+    if (!res.ok && res.status !== 404) throw new Error(`查詢歌曲失敗 (${res.status})`);
+    if (!res.ok) continue;
+    const data = await res.json();
+    if (chunk.length === 1) {
+      if (data && data.id) out.set(chunk[0], data);
+    } else {
+      for (const [h, doc] of Object.entries(data || {})) if (doc && doc.id) out.set(h.toLowerCase(), doc);
+    }
+  }
+  return out;
+}
+
 export function latestVersion(map) {
   const versions = map.versions || [];
   return versions.find((v) => v.state === 'Published') || versions[0];

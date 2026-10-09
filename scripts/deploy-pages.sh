@@ -5,6 +5,8 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 OUT="$(mktemp -d)"
 cp -r index.html css js vendor _headers "$OUT"/
+# source download linked from the page footer (committed files only)
+git archive --format=zip --prefix=webxr-saber/ -o "$OUT/webxr-saber-source.zip" HEAD
 npx wrangler pages deploy "$OUT" \
   --project-name="${PAGES_PROJECT:-xr-saber}" \
   --branch="${PAGES_BRANCH:-main}" \

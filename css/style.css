@@ -244,6 +244,18 @@ html, body {
 .results li .r-size { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .results li .del { flex: none; border: 1px solid var(--border); background: transparent; color: var(--muted); border-radius: 6px; padding: 2px 8px; cursor: pointer; }
 .results li .del:hover { border-color: var(--red); color: #ffb3bb; }
+.row.inline { margin-top: 0; flex: 1; min-width: 240px; }
+.row.inline input { flex: 1; }
+.pl-detail { margin-top: 10px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+.pl-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pl-head > div { flex: 1; min-width: 140px; }
+.pl-head img { width: 56px; height: 56px; border-radius: 8px; object-fit: cover; background: #222; }
+.pl-detail .results { max-height: 420px; }
+.results li .r-state { margin-left: auto; font-size: 12px; white-space: nowrap; color: var(--accent, #8cb4ff); }
+.results li .r-state.ok { color: #60ffa0; }
+.results li.missing { opacity: 0.5; cursor: default; }
+.site-footer { margin: 24px 0 8px; text-align: center; color: var(--muted); font-size: 13px; }
+.site-footer a { color: inherit; }
 
 .preview-btn { margin-top: 8px; min-width: 96px; }
 .preview-btn.playing { background: rgba(124, 156, 255, 0.45); }

@@ -56,6 +56,37 @@
           <button class="chip" data-sort="Curated" type="button">精選</button>
         </div>
         <ul id="results" class="results"></ul>
+
+        <h3>歌單 <span id="pl-info" class="lib-info"></span></h3>
+        <p class="muted small-text lib-note">上傳 Beat Saber 的 .bplist 歌單檔，或匯入 BeatSaver 上的歌單。歌曲在點選時才下載，也可以「全部下載」。</p>
+        <div class="row">
+          <label class="btn ghost small">
+            <input id="file-bplist" type="file" accept=".bplist,.json,application/json" multiple hidden />
+            上傳 .bplist
+          </label>
+          <form id="pl-id-form" class="row inline">
+            <input id="pl-id" type="text" placeholder="BeatSaver 歌單 ID 或網址" autocomplete="off" />
+            <button class="btn small" type="submit">匯入</button>
+          </form>
+        </div>
+        <form id="pl-search-form" class="row">
+          <input id="pl-search" type="search" placeholder="搜尋 BeatSaver 歌單（留空 = 熱門）" autocomplete="off" />
+          <button class="btn small" type="submit">搜尋歌單</button>
+        </form>
+        <ul id="pl-results" class="results small" hidden></ul>
+        <ul id="playlists" class="results small"><li class="muted">尚無歌單</li></ul>
+        <div id="pl-detail" class="pl-detail" hidden>
+          <div class="pl-head">
+            <img id="pl-cover" alt="" />
+            <div>
+              <div id="pl-title" class="r-title"></div>
+              <div id="pl-meta" class="r-meta"></div>
+            </div>
+            <button id="pl-all" class="btn small" type="button">全部下載</button>
+            <button id="pl-back" class="btn ghost small" type="button">返回</button>
+          </div>
+          <ul id="pl-songs" class="results"></ul>
+        </div>
         <h3>已存的歌曲 <span id="library-info" class="lib-info"></span></h3>
         <p class="muted small-text lib-note">下載或載入的歌會存在這個瀏覽器裡，重新整理後仍在（上限 1 GB，滿了會刪最久沒玩的）。
           <button id="lib-clear" class="btn ghost tiny" type="button" hidden>清除全部</button></p>
@@ -171,6 +202,12 @@
 
     <section id="last-result" class="card result" hidden></section>
     <div id="status" class="status" role="status"></div>
+
+    <footer class="site-footer">
+      原始碼：<a id="src-zip" href="webxr-saber-source.zip" download>下載原始碼 (.zip)</a>
+      · <a href="https://github.com/kevinchen-pimq/report-ppt/tree/claude/dazzling-heisenberg-tj7g37" target="_blank" rel="noopener">GitHub</a>
+      · 純靜態網頁，解壓縮後用任何 HTTPS / localhost 伺服器即可執行
+    </footer>
   </main>
 
   <script type="module" src="js/main.js"></script>
