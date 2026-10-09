@@ -331,17 +331,17 @@ export class NoteStyle {
       this.bodyGeo = new RoundedBoxGeometry(S, S, S, 2, 0.015);
       this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 1, 0.012);
     } else if (this.id === 'outline') {
-      this.bodyGeo = new RoundedBoxGeometry(S, S, S, 2, 0.03);
-      this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 2, 0.02);
+      this.bodyGeo = new RoundedBoxGeometry(S, S, S, 4, 0.07);
+      this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 3, 0.04);
     } else if (this.id === 'neon') {
       this.bodyGeo = new THREE.BoxGeometry(S * 0.96, S * 0.96, S * 0.96);
       this.frameGeo = new THREE.BoxGeometry(S, S, S);
       this.linkGeo = new THREE.BoxGeometry(S * 0.96, S * 0.26, S * 0.96);
       this.linkFrameGeo = new THREE.BoxGeometry(S, S * 0.28, S);
     } else {
-      // classic: tight corners, bright rim and a soft halo
-      this.bodyGeo = new RoundedBoxGeometry(S, S, S, 3, 0.035);
-      this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 2, 0.025);
+      // classic: 7 cm rounded corners, bright rim and a soft halo
+      this.bodyGeo = new RoundedBoxGeometry(S, S, S, 4, 0.07);
+      this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 3, 0.04);
     }
     this.disposables.push(this.bodyGeo, this.linkGeo, this.frameGeo, this.linkFrameGeo);
     this.mats = [0, 1].map((c) => this.makeBodyMaterial(c));
@@ -490,7 +490,8 @@ export function glowTexture() {
 
 // Arrow plane layout (fractions of the note size): a wide flat triangle whose base
 // sits near the edge and whose tip points toward the centre (= the cut direction, local -Y).
-export const ARROW_PLANE = { w: 0.86, h: 0.4, centerY: 0.305 };
+// (kept inside the flat part of the face: 7 cm corner radius = 0.155 of the note size)
+export const ARROW_PLANE = { w: 0.8, h: 0.4, centerY: 0.245 };
 
 let _arrow = null;
 export function arrowTexture() {
