@@ -206,7 +206,15 @@ export class Game {
     this.sabers[1].setColor(right);
     this.notes.setColors(left, right, mc.obstacle ?? COLOR_WALL);
     this.arcs.setColors(left, right);
-    this.env.setColors(envLeft, envRight, mc.envLeftBoost ?? envLeft, mc.envRightBoost ?? envRight);
+    // white lights: the map's white colour only with Chroma lighting on
+    const ch = this.chromaLights() && s.useMapColors ? this.meta.chroma : null;
+    const white = ch?.white ?? 0xffffff;
+    this.env.setColors(envLeft, envRight, mc.envLeftBoost ?? envLeft, mc.envRightBoost ?? envRight, white, ch?.whiteBoost ?? white);
+  }
+
+  /** Chroma setting on and the current map lights its environment with Chroma events. */
+  chromaLights() {
+    return !!(this.settings.chroma && this.map?.chroma?.events && this.meta?.chroma);
   }
 
   // ---------------------------------------------------------------------------
@@ -430,9 +438,13 @@ export class Game {
     setPlayerHeight(this.settings.playerHeight);
     this.applyAppearance(true);
     this.audio.stop();
+    // Chroma (setting): object colours, and per-light lighting when the map has Chroma events
+    const chroma = !!(this.settings.chroma && this.map.chroma?.used);
+    this.notes.setChroma(chroma);
+    this.arcs.chroma = chroma;
     this.notes.reset(this.map);
     this.arcs.reset(this.map);
-    this.env.reset(this.map.events);
+    this.env.reset(this.map.events, this.chromaLights() ? { environment: this.meta.environment } : null);
     this.score.reset(this.map.maxScore);
     this.effects.clear();
     this.hud.clearPopups();

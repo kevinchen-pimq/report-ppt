@@ -3,6 +3,7 @@ import { laneX, layerY, COLOR_LEFT, COLOR_RIGHT } from './constants.js';
 
 const MOVE_TIME = 0.4; // keep in sync with Notes.js
 const WIDTH = 0.045;
+const _chroma = new THREE.Color();
 
 /**
  * Arcs (sliders): glowing ribbons that guide the saber from a head note to a tail.
@@ -17,6 +18,7 @@ export class ArcManager {
     this.active = [];
     this.map = null;
     this.lastBuzz = [0, 0];
+    this.chroma = false; // Chroma arc colours (setting)
   }
 
   setColors(left, right) {
@@ -99,7 +101,7 @@ export class ArcManager {
         this.active.splice(k, 1);
         continue;
       }
-      const col = this.colors[arc.color];
+      const col = this.chroma && arc.chroma != null ? _chroma.setHex(arc.chroma) : this.colors[arc.color];
       const pos = obj.mesh.geometry.attributes.position;
       const cols = obj.mesh.geometry.attributes.color;
       const n = obj.n;

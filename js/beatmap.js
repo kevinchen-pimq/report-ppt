@@ -92,10 +92,10 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
     for (const n of json._notes || []) {
       const x = v2Pos(n._lineIndex ?? 0);
       const y = v2Pos(n._lineLayer ?? 0);
-      if (n._type === 3) raw.bombs.push({ beat: n._time, x, y });
+      if (n._type === 3) raw.bombs.push({ beat: n._time, x, y, ch: objColor(n._customData) });
       else if (n._type === 0 || n._type === 1) {
         const { d, a, precise } = v2Dir(n._cutDirection ?? 8);
-        raw.notes.push({ beat: n._time, x, y, c: n._type, d, a, precise });
+        raw.notes.push({ beat: n._time, x, y, c: n._type, d, a, precise, ch: objColor(n._customData) });
       }
     }
     for (const o of json._obstacles || []) {
@@ -113,17 +113,18 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
         h = (o._type >= 4001 ? Math.floor(v / 1000) : v) / 1000 * 5;
         y = o._type >= 4001 ? ((v % 1000) / 750) * 5 : 0;
       }
-      raw.walls.push({ beat: o._time, x: v2Pos(o._lineIndex ?? 0), y, d: o._duration, w: v2Pos(o._width ?? 1), h });
+      raw.walls.push({ beat: o._time, x: v2Pos(o._lineIndex ?? 0), y, d: o._duration, w: v2Pos(o._width ?? 1), h, ch: objColor(o._customData) });
     }
     for (const e of json._events || []) {
       if (e._type === 100) raw.bpmChanges.push({ beat: e._time, bpm: e._floatValue });
-      else raw.events.push({ beat: e._time, type: e._type, value: e._value, f: e._floatValue ?? 1 });
+      else raw.events.push({ beat: e._time, type: e._type, value: e._value, f: e._floatValue ?? 1, cd: e._customData });
     }
     for (const a of json._sliders || []) {
       raw.arcs.push({
         beat: a._headTime, c: a._colorType ?? 0, x: a._headLineIndex ?? 0, y: a._headLineLayer ?? 0, d: a._headCutDirection ?? 8,
         mu: a._headControlPointLengthMultiplier ?? 1, tb: a._tailTime, tx: a._tailLineIndex ?? 0, ty: a._tailLineLayer ?? 0,
         tc: a._tailCutDirection ?? 8, tmu: a._tailControlPointLengthMultiplier ?? 1, m: a._sliderMidAnchorMode ?? 0,
+        ch: objColor(a._customData),
       });
     }
     const cd = json._customData || json.customData || {};
@@ -131,16 +132,16 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
       raw.bpmChanges.push({ beat: c._time ?? c.b, bpm: c._BPM ?? c._bpm ?? c.m });
     }
   } else if (version === 3) {
-    for (const n of json.colorNotes || []) raw.notes.push({ beat: n.b, x: n.x ?? 0, y: n.y ?? 0, c: n.c ?? 0, d: n.d ?? 8, a: n.a ?? 0 });
-    for (const n of json.bombNotes || []) raw.bombs.push({ beat: n.b, x: n.x ?? 0, y: n.y ?? 0 });
-    for (const o of json.obstacles || []) raw.walls.push({ beat: o.b, x: o.x ?? 0, y: o.y ?? 0, d: o.d ?? 0, w: o.w ?? 1, h: o.h ?? 5 });
+    for (const n of json.colorNotes || []) raw.notes.push({ beat: n.b, x: n.x ?? 0, y: n.y ?? 0, c: n.c ?? 0, d: n.d ?? 8, a: n.a ?? 0, ch: objColor(n.customData) });
+    for (const n of json.bombNotes || []) raw.bombs.push({ beat: n.b, x: n.x ?? 0, y: n.y ?? 0, ch: objColor(n.customData) });
+    for (const o of json.obstacles || []) raw.walls.push({ beat: o.b, x: o.x ?? 0, y: o.y ?? 0, d: o.d ?? 0, w: o.w ?? 1, h: o.h ?? 5, ch: objColor(o.customData) });
     for (const s of json.burstSliders || []) {
-      raw.chains.push({ beat: s.b, x: s.x ?? 0, y: s.y ?? 0, c: s.c ?? 0, d: s.d ?? 0, tb: s.tb, tx: s.tx ?? 0, ty: s.ty ?? 0, sc: s.sc ?? 3, s: s.s ?? 1 });
+      raw.chains.push({ beat: s.b, x: s.x ?? 0, y: s.y ?? 0, c: s.c ?? 0, d: s.d ?? 0, tb: s.tb, tx: s.tx ?? 0, ty: s.ty ?? 0, sc: s.sc ?? 3, s: s.s ?? 1, ch: objColor(s.customData) });
     }
     for (const a of json.sliders || []) {
-      raw.arcs.push({ beat: a.b, c: a.c ?? 0, x: a.x ?? 0, y: a.y ?? 0, d: a.d ?? 8, mu: a.mu ?? 1, tb: a.tb, tx: a.tx ?? 0, ty: a.ty ?? 0, tc: a.tc ?? 8, tmu: a.tmu ?? 1, m: a.m ?? 0 });
+      raw.arcs.push({ beat: a.b, c: a.c ?? 0, x: a.x ?? 0, y: a.y ?? 0, d: a.d ?? 8, mu: a.mu ?? 1, tb: a.tb, tx: a.tx ?? 0, ty: a.ty ?? 0, tc: a.tc ?? 8, tmu: a.tmu ?? 1, m: a.m ?? 0, ch: objColor(a.customData) });
     }
-    for (const e of json.basicBeatmapEvents || []) raw.events.push({ beat: e.b, type: e.et, value: e.i, f: e.f ?? 1 });
+    for (const e of json.basicBeatmapEvents || []) raw.events.push({ beat: e.b, type: e.et, value: e.i, f: e.f ?? 1, cd: e.customData });
     for (const e of json.colorBoostBeatmapEvents || []) raw.events.push({ beat: e.b, type: 5, value: e.o ? 1 : 0, f: 1 });
     for (const e of json.bpmEvents || []) raw.bpmChanges.push({ beat: e.b, bpm: e.m });
   } else {
@@ -210,29 +211,39 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
   let id = 0;
   for (const n of raw.notes) {
     if (!Number.isFinite(n.beat)) continue;
-    notes.push({ id: id++, kind: 'note', time: toTime(n.beat), beat: n.beat, x: n.x, y: n.y, color: n.c === 1 ? 1 : 0, dir: n.d, angle: n.a || 0 });
+    notes.push({ id: id++, kind: 'note', time: toTime(n.beat), beat: n.beat, x: n.x, y: n.y, color: n.c === 1 ? 1 : 0, dir: n.d, angle: n.a || 0, chroma: n.ch });
   }
   for (const b of raw.bombs) {
     if (!Number.isFinite(b.beat)) continue;
-    notes.push({ id: id++, kind: 'bomb', time: toTime(b.beat), beat: b.beat, x: b.x, y: b.y, color: -1, dir: 8, angle: 0 });
+    notes.push({ id: id++, kind: 'bomb', time: toTime(b.beat), beat: b.beat, x: b.x, y: b.y, color: -1, dir: 8, angle: 0, chroma: b.ch });
   }
   for (const ch of raw.chains) {
     const links = buildChainLinks(ch);
     for (const l of links) {
-      notes.push({ id: id++, kind: 'link', time: toTime(l.beat), beat: l.beat, x: l.x, y: l.y, color: ch.c === 1 ? 1 : 0, dir: 8, angle: l.angle, linkAngle: l.angle });
+      notes.push({ id: id++, kind: 'link', time: toTime(l.beat), beat: l.beat, x: l.x, y: l.y, color: ch.c === 1 ? 1 : 0, dir: 8, angle: l.angle, linkAngle: l.angle, chroma: ch.ch });
     }
   }
   notes.sort((a, b) => a.time - b.time || a.id - b.id);
 
   const walls = raw.walls
     .filter((w) => Number.isFinite(w.beat) && w.w !== 0 && w.h !== 0)
-    .map((w) => ({ time: toTime(w.beat), endTime: toTime(w.beat + Math.max(0, w.d)), x: w.x, y: w.y, w: w.w, h: w.h }))
+    .map((w) => ({ time: toTime(w.beat), endTime: toTime(w.beat + Math.max(0, w.d)), x: w.x, y: w.y, w: w.w, h: w.h, chroma: w.ch }))
     .sort((a, b) => a.time - b.time);
 
+  let chromaEvents = 0;
   const events = raw.events
     .filter((e) => Number.isFinite(e.beat))
-    .map((e) => ({ time: toTime(e.beat), type: e.type, value: e.value, f: e.f }))
+    .map((e) => {
+      const out = { time: toTime(e.beat), type: e.type, value: e.value, f: e.f };
+      const ch = e.cd ? parseChromaEvent(e.cd, e.type, e.beat, toTime) : null;
+      if (ch) {
+        out.ch = ch;
+        chromaEvents++;
+      }
+      return out;
+    })
     .sort((a, b) => a.time - b.time);
+  chromaEvents += applyLegacyChroma(events);
 
   const arcs = raw.arcs
     .filter((a) => Number.isFinite(a.beat) && Number.isFinite(a.tb) && a.tb > a.beat)
@@ -247,9 +258,16 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
   for (const n of notes) lastTime = Math.max(lastTime, n.time);
   for (const w of walls) lastTime = Math.max(lastTime, w.endTime);
 
+  let chromaObjects = 0;
+  for (const n of notes) if (n.chroma != null) chromaObjects++;
+  for (const w of walls) if (w.chroma != null) chromaObjects++;
+  for (const a of arcs) if (a.chroma != null) chromaObjects++;
+
   return {
     version, njs, halfJump, notes, walls, arcs, events, colorNotes, links, lastTime,
     njsEvents: raw.njs.length, njsAt, maxScore: computeMaxScore(notes),
+    // Chroma data found in this difficulty (used only when the chroma setting is on)
+    chroma: { events: chromaEvents, objects: chromaObjects, used: chromaEvents + chromaObjects > 0 },
   };
 }
 
@@ -338,7 +356,7 @@ function buildArc(a, toTime) {
     // back to lane / layer units so the game can apply its lane mapping
     samples.push({ x: mx / 0.6, y: my / 0.5, time: toTime(a.beat + (a.tb - a.beat) * u) });
   }
-  return { time: samples[0].time, endTime: samples[samples.length - 1].time, color: a.c === 1 ? 1 : 0, samples };
+  return { time: samples[0].time, endTime: samples[samples.length - 1].time, color: a.c === 1 ? 1 : 0, samples, chroma: a.ch };
 }
 
 // ---------------------------------------------------------------------------
@@ -412,4 +430,220 @@ export function makeNjsCurve(base, events, toTime) {
     if (span <= 0) return next.value;
     return cur.value + (next.value - cur.value) * ease(next.easing, (t - cur.time) / span);
   };
+}
+
+// ---------------------------------------------------------------------------
+// Chroma (lighting / colour mod): v2 keys have a leading underscore (`_color`),
+// v3 keys don't (`color`). Unknown keys are ignored.
+
+const BACK_C1 = 1.70158;
+const BACK_C2 = BACK_C1 * 1.525;
+const BACK_C3 = BACK_C1 + 1;
+const ELASTIC_C4 = (2 * Math.PI) / 3;
+const ELASTIC_C5 = (2 * Math.PI) / 4.5;
+function bounceOut(t) {
+  const n = 7.5625;
+  const d = 2.75;
+  if (t < 1 / d) return n * t * t;
+  if (t < 2 / d) return n * (t -= 1.5 / d) * t + 0.75;
+  if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375;
+  return n * (t -= 2.625 / d) * t + 0.984375;
+}
+
+/** Chroma / Heck easings (easings.net names plus easeLinear and easeStep), t in 0..1. */
+export const CHROMA_EASINGS = {
+  easeLinear: (t) => t,
+  easeStep: (t) => (t >= 1 ? 1 : 0),
+  easeInQuad: EASINGS[4],
+  easeOutQuad: EASINGS[5],
+  easeInOutQuad: EASINGS[6],
+  easeInCubic: EASINGS[7],
+  easeOutCubic: EASINGS[8],
+  easeInOutCubic: EASINGS[9],
+  easeInQuart: EASINGS[10],
+  easeOutQuart: EASINGS[11],
+  easeInOutQuart: EASINGS[12],
+  easeInQuint: EASINGS[13],
+  easeOutQuint: EASINGS[14],
+  easeInOutQuint: EASINGS[15],
+  easeInSine: EASINGS[1],
+  easeOutSine: EASINGS[2],
+  easeInOutSine: EASINGS[3],
+  easeInCirc: EASINGS[19],
+  easeOutCirc: EASINGS[20],
+  easeInOutCirc: EASINGS[21],
+  easeInExpo: EASINGS[16],
+  easeOutExpo: EASINGS[17],
+  easeInOutExpo: EASINGS[18],
+  easeInElastic: (t) => (t === 0 ? 0 : t === 1 ? 1 : -(2 ** (10 * t - 10)) * Math.sin((t * 10 - 10.75) * ELASTIC_C4)),
+  easeOutElastic: (t) => (t === 0 ? 0 : t === 1 ? 1 : 2 ** (-10 * t) * Math.sin((t * 10 - 0.75) * ELASTIC_C4) + 1),
+  easeInOutElastic: (t) => (t === 0 ? 0 : t === 1 ? 1 : t < 0.5
+    ? -(2 ** (20 * t - 10) * Math.sin((20 * t - 11.125) * ELASTIC_C5)) / 2
+    : (2 ** (-20 * t + 10) * Math.sin((20 * t - 11.125) * ELASTIC_C5)) / 2 + 1),
+  easeInBack: (t) => BACK_C3 * t * t * t - BACK_C1 * t * t,
+  easeOutBack: (t) => 1 + BACK_C3 * (t - 1) ** 3 + BACK_C1 * (t - 1) ** 2,
+  easeInOutBack: (t) => (t < 0.5
+    ? ((2 * t) ** 2 * ((BACK_C2 + 1) * 2 * t - BACK_C2)) / 2
+    : ((2 * t - 2) ** 2 * ((BACK_C2 + 1) * (t * 2 - 2) + BACK_C2) + 2) / 2),
+  easeInBounce: (t) => 1 - bounceOut(1 - t),
+  easeOutBounce: bounceOut,
+  easeInOutBounce: (t) => (t < 0.5 ? (1 - bounceOut(1 - 2 * t)) / 2 : (1 + bounceOut(2 * t - 1)) / 2),
+};
+
+function chromaEasing(name) {
+  return (typeof name === 'string' && CHROMA_EASINGS[name]) || null;
+}
+
+/** [r, g, b, a?] (0..1, may be HDR) -> [r, g, b, brightness] with the hue kept and channels in 0..1. */
+function lightColor(c) {
+  if (!Array.isArray(c) || c.length < 3) return null;
+  let r = Math.max(0, Number(c[0]) || 0);
+  let g = Math.max(0, Number(c[1]) || 0);
+  let b = Math.max(0, Number(c[2]) || 0);
+  let k = c.length > 3 && Number.isFinite(Number(c[3])) ? Math.max(0, Number(c[3])) : 1;
+  const max = Math.max(r, g, b);
+  if (max > 1) {
+    // HDR colour: keep the hue, turn the extra into (limited) brightness
+    r /= max;
+    g /= max;
+    b /= max;
+    k *= Math.min(max, 1.5);
+  }
+  return [r, g, b, Math.min(k, 1.5)];
+}
+
+/** Note / bomb / wall / arc colour from its customData -> 0xRRGGBB (hue kept for HDR values), or null. */
+function objColor(cd) {
+  if (!cd || typeof cd !== 'object') return null;
+  const c = lightColor(cd._color ?? cd.color);
+  if (!c) return null;
+  return (Math.round(c[0] * 255) << 16) | (Math.round(c[1] * 255) << 8) | Math.round(c[2] * 255);
+}
+
+// Chroma 1 "RGB events": a light event whose value is 2000000000 + 0xRRGGBB sets the colour of
+// the later events of that type (it doesn't switch lights itself). Returns how many were found.
+export const LEGACY_RGB = 2000000000;
+function applyLegacyChroma(events) {
+  const colors = new Map();
+  let found = 0;
+  for (const e of events) {
+    if (e.value >= LEGACY_RGB) {
+      const v = e.value - LEGACY_RGB;
+      colors.set(e.type, [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255, 1]);
+      found++;
+      continue;
+    }
+    const c = colors.get(e.type);
+    if (!c || e.value === 0) continue;
+    if (!e.ch) e.ch = { color: c };
+    else if (!e.ch.color) e.ch.color = c;
+  }
+  return found;
+}
+
+const num = (v) => (Number.isFinite(Number(v)) && v !== null && v !== '' && typeof v !== 'boolean' ? Number(v) : null);
+
+/** Normalised Chroma data of a basic event, or null when it has none we use. */
+function parseChromaEvent(cd, type, beat, toTime) {
+  if (!cd || typeof cd !== 'object') return null;
+  const pick = (v2, v3) => (cd[v2] !== undefined ? cd[v2] : cd[v3]);
+  const ch = {};
+  let any = false;
+  if (type <= 4 || (type >= 6 && type <= 7) || (type >= 10 && type <= 11)) {
+    // light events
+    let ids = pick('_lightID', 'lightID');
+    if (typeof ids === 'number') ids = [ids];
+    if (Array.isArray(ids)) {
+      ids = ids.map(Number).filter((n) => Number.isInteger(n) && n >= 0);
+      if (ids.length) {
+        ch.ids = ids;
+        any = true;
+      }
+    }
+    const color = lightColor(pick('_color', 'color'));
+    if (color) {
+      ch.color = color;
+      any = true;
+    }
+    const g = cd._lightGradient;
+    if (g && typeof g === 'object') {
+      const durBeats = Math.max(0, num(g._duration) ?? 0);
+      ch.grad = {
+        dur: Math.max(0, toTime(beat + durBeats) - toTime(beat)),
+        start: lightColor(g._startColor) || [1, 1, 1, 1],
+        end: lightColor(g._endColor) || [1, 1, 1, 1],
+        ease: chromaEasing(g._easing) || CHROMA_EASINGS.easeLinear,
+      };
+      any = true;
+    }
+    const ease = chromaEasing(pick('_easing', 'easing'));
+    if (ease) {
+      ch.ease = ease;
+      any = true;
+    }
+    const lerp = pick('_lerpType', 'lerpType');
+    if (typeof lerp === 'string' && lerp.toUpperCase() === 'HSV') {
+      ch.hsv = true;
+      any = true;
+    }
+  } else if (type === 8) {
+    // ring rotation
+    for (const [k2, k3, key] of [['_rotation', 'rotation', 'rotation'], ['_step', 'step', 'step'], ['_prop', 'prop', 'prop'], ['_speed', 'speed', 'speed']]) {
+      const v = num(pick(k2, k3));
+      if (v !== null) {
+        ch[key] = v;
+        any = true;
+      }
+    }
+    const dir = num(pick('_direction', 'direction'));
+    if (dir !== null) {
+      ch.dir = dir;
+      any = true;
+    }
+    for (const [k, key] of [['_stepMult', 'stepMult'], ['_propMult', 'propMult'], ['_speedMult', 'speedMult']]) {
+      const v = num(cd[k]);
+      if (v !== null) {
+        ch[key] = v;
+        any = true;
+      }
+    }
+    const filter = pick('_nameFilter', 'nameFilter');
+    if (typeof filter === 'string') {
+      ch.nameFilter = filter;
+      any = true;
+    }
+    if (cd._counterSpin === true) {
+      ch.counterSpin = true;
+      any = true;
+    }
+    if (cd._reset === true) {
+      ch.reset = true;
+      any = true;
+    }
+  } else if (type === 9) {
+    // ring zoom
+    const step = num(pick('_step', 'step'));
+    const speed = num(pick('_speed', 'speed'));
+    if (step !== null) ch.step = step;
+    if (speed !== null) ch.speed = speed;
+    any = step !== null || speed !== null;
+  } else if (type === 12 || type === 13) {
+    // laser speed
+    const lock = pick('_lockPosition', 'lockRotation') ?? cd.lockPosition;
+    if (lock === true) {
+      ch.lock = true;
+      any = true;
+    }
+    const speed = num(cd._preciseSpeed ?? pick('_speed', 'speed'));
+    if (speed !== null) {
+      ch.speed = speed;
+      any = true;
+    }
+    const dir = num(pick('_direction', 'direction'));
+    if (dir !== null) {
+      ch.dir = dir;
+      any = true;
+    }
+  }
+  return any ? ch : null;
 }

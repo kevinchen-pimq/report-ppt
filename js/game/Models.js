@@ -530,30 +530,51 @@ export class NoteStyle {
       this.linkGeo = new RoundedBoxGeometry(S, S * 0.28, S, 3, 0.04);
     }
     this.disposables.push(this.bodyGeo, this.linkGeo, this.frameGeo, this.linkFrameGeo);
-    this.mats = [0, 1].map((c) => this.makeBodyMaterial(c));
-    if (this.id === 'neon') {
-      this.frameMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.05, edge: 0.03, intensity: 1.6, size: [S, S, S] }), 'uniform'));
-      this.linkFrameMats = [0, 1].map((c) => this.track(c, createEdgeGlowMaterial({ color: this.colors[c], fill: 0.05, edge: 0.02, intensity: 1.6, size: [S, S * 0.28, S] }), 'uniform'));
-    }
     // Outline: black body, thick glowing outline, symbols drawn in the note colour
     this.coloredSymbols = this.id === 'outline';
+    this.mats = [];
+    for (const c of [0, 1]) this.buildSlot(c);
+  }
+
+  /**
+   * Materials of one colour slot: 0 left, 1 right, 2+ extra colours (Chroma note colours,
+   * see addSlot). Every note of a slot shares them.
+   */
+  buildSlot(c) {
+    const S = NOTE_SIZE;
+    const col = this.colors[c];
+    this.colorMats[c] = [];
+    this.mats[c] = this.makeBodyMaterial(c);
+    if (this.id === 'neon') {
+      (this.frameMats ||= [])[c] = this.track(c, createEdgeGlowMaterial({ color: col, fill: 0.05, edge: 0.03, intensity: 1.6, size: [S, S, S] }), 'uniform');
+      (this.linkFrameMats ||= [])[c] = this.track(c, createEdgeGlowMaterial({ color: col, fill: 0.05, edge: 0.02, intensity: 1.6, size: [S, S * 0.28, S] }), 'uniform');
+    }
     if (this.id === 'outline') {
       // silhouette outline (inverted hull): only the outer contour is drawn, from any angle
-      this.hullMats = [0, 1].map((c) => this.track(c, createHullMaterial({ color: this.colors[c], thickness: 0.014 }), 'uniform'));
-      this.hullGlowMats = [0, 1].map((c) => this.track(c, createHullMaterial({ color: this.colors[c], thickness: 0.04, glow: true, opacity: 0.55 }), 'uniform'));
-      this.linkHullMats = [0, 1].map((c) => this.track(c, createHullMaterial({ color: this.colors[c], thickness: 0.01 }), 'uniform'));
-      this.haloMats = [0, 1].map((c) => this.track(c, new THREE.SpriteMaterial({
-        map: glowTexture(), color: this.colors[c], transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-      }), 'sprite'));
+      (this.hullMats ||= [])[c] = this.track(c, createHullMaterial({ color: col, thickness: 0.014 }), 'uniform');
+      (this.hullGlowMats ||= [])[c] = this.track(c, createHullMaterial({ color: col, thickness: 0.04, glow: true, opacity: 0.55 }), 'uniform');
+      (this.linkHullMats ||= [])[c] = this.track(c, createHullMaterial({ color: col, thickness: 0.01 }), 'uniform');
+      (this.haloMats ||= [])[c] = this.track(c, new THREE.SpriteMaterial({
+        map: glowTexture(), color: col, transparent: true, opacity: 0.45, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      }), 'sprite');
     }
     if (this.id === 'classic') {
       // glass body (shader) + soft silhouette glow, like the reference: dark core, bright glassy edges
-      this.hullGlowMats = [0, 1].map((c) => this.track(c, createHullMaterial({ color: this.colors[c], thickness: 0.035, glow: true, opacity: 0.45 }), 'uniform'));
-      this.haloMats = [0, 1].map((c) => this.track(c, new THREE.SpriteMaterial({
-        map: glowTexture(), color: this.colors[c], transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
-      }), 'sprite'));
+      (this.hullGlowMats ||= [])[c] = this.track(c, createHullMaterial({ color: col, thickness: 0.035, glow: true, opacity: 0.45 }), 'uniform');
+      (this.haloMats ||= [])[c] = this.track(c, new THREE.SpriteMaterial({
+        map: glowTexture(), color: col, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, fog: false,
+      }), 'sprite');
     }
-    if (this.id === 'custom') this.customByColor = [0, 1].map((c) => fitNoteModel(custom));
+    if (this.id === 'custom') (this.customByColor ||= [])[c] = fitNoteModel(this.custom);
+  }
+
+  /** Adds a colour slot with its own fixed colour (left / right colour changes don't touch it); returns its index. */
+  addSlot(color) {
+    const c = this.colors.length;
+    this.colors.push(new THREE.Color(color));
+    this.buildSlot(c);
+    this.applySlotColor(c);
+    return c;
   }
 
   track(c, mat, kind = 'standard') {
@@ -586,24 +607,26 @@ export class NoteStyle {
   setColors(left, right) {
     this.colors[0].set(left);
     this.colors[1].set(right);
-    for (let c = 0; c < 2; c++) {
-      const col = this.colors[c];
-      for (const { mat, kind } of this.colorMats[c]) {
-        if (kind === 'uniform') mat.uniforms.color.value.copy(col);
-        else if (kind === 'sprite' || kind === 'basic') mat.color.copy(col);
-        else if (kind === 'light') mat.color.copy(col).lerp(_WHITE, 0.45);
-        else if (kind === 'dimmed') {
-          mat.color.copy(col).multiplyScalar(0.72);
-          mat.emissive.copy(col);
-        }
-        else if (kind === 'emissiveOnly') mat.emissive.copy(col);
-        else {
-          mat.color.copy(col);
-          if (mat.emissive) mat.emissive.copy(col);
-        }
+    for (let c = 0; c < 2; c++) this.applySlotColor(c);
+  }
+
+  applySlotColor(c) {
+    const col = this.colors[c];
+    for (const { mat, kind } of this.colorMats[c]) {
+      if (kind === 'uniform') mat.uniforms.color.value.copy(col);
+      else if (kind === 'sprite' || kind === 'basic') mat.color.copy(col);
+      else if (kind === 'light') mat.color.copy(col).lerp(_WHITE, 0.45);
+      else if (kind === 'dimmed') {
+        mat.color.copy(col).multiplyScalar(0.72);
+        mat.emissive.copy(col);
       }
-      if (this.customByColor) tint(this.customByColor[c].tinted, col, 0.15);
+      else if (kind === 'emissiveOnly') mat.emissive.copy(col);
+      else {
+        mat.color.copy(col);
+        if (mat.emissive) mat.emissive.copy(col);
+      }
     }
+    if (this.customByColor) tint(this.customByColor[c].tinted, col, 0.15);
   }
 
   buildNote(c) {
