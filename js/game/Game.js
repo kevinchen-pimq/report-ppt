@@ -25,6 +25,9 @@ const _m = new THREE.Matrix4();
 const _m2 = new THREE.Matrix4();
 const _v = new THREE.Vector3();
 const _v2 = new THREE.Vector3();
+const _from = new THREE.Vector3();
+const _to = new THREE.Vector3();
+const IN_GAME = new Set(['ready', 'playing', 'paused', 'finished']);
 const _up = new THREE.Vector3(0, 1, 0);
 const _ray = new THREE.Raycaster();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0.9);
@@ -120,6 +123,9 @@ export class Game {
     this.audio.setSfxVolume(s.sfxVolume);
     this.spectator.setMode(s.spectator);
     this.menu.placeForHeight(s.playerHeight);
+    // Gameplay options: take effect immediately (switching off removes what's on screen)
+    this.notes.setOptions({ walls: s.showWalls !== false, bombs: s.showBombs !== false });
+    this.effects.setShowDebris(s.showDebris !== false);
     if (this.state !== 'playing') {
       setPlayerHeight(s.playerHeight);
       this.applyColors();
@@ -578,9 +584,8 @@ export class Game {
       const gp = src?.gamepad;
       if (!gp) continue;
       const prev = this.prevButtons[i];
-      const pressed = (idx) => gp.buttons[idx]?.pressed && !prev[idx];
-      const a = pressed(4);
-      const b = pressed(5);
+      const a = gp.buttons[4]?.pressed && !prev[4];
+      const b = gp.buttons[5]?.pressed && !prev[5];
       prev[4] = gp.buttons[4]?.pressed;
       prev[5] = gp.buttons[5]?.pressed;
       if (b) {
@@ -703,17 +708,17 @@ export class Game {
         tip = _v.set(next.x + next.dx * ph * 0.5, next.y + next.dy * ph * 0.5, -AUTO_CUT_Z);
       } else {
         const from = prev
-          ? new THREE.Vector3(prev.x + prev.dx * 0.5, prev.y + prev.dy * 0.5, -AUTO_CUT_Z)
-          : rest.clone();
+          ? _from.set(prev.x + prev.dx * 0.5, prev.y + prev.dy * 0.5, -AUTO_CUT_Z)
+          : _from.copy(rest);
         const fromT = prev ? prev.t + AUTO_SWING : t - 1;
         if (next && next.t - AUTO_SWING - fromT < 1.5) {
-          const to = new THREE.Vector3(next.x - next.dx * 0.5, next.y - next.dy * 0.5, -AUTO_CUT_Z);
+          const to = _to.set(next.x - next.dx * 0.5, next.y - next.dy * 0.5, -AUTO_CUT_Z);
           let f = (t - fromT) / Math.max(0.01, next.t - AUTO_SWING - fromT);
           f = Math.max(0, Math.min(1, f));
           f = f * f * (3 - 2 * f);
           tip = from.lerp(to, f);
         } else {
-          const restV = new THREE.Vector3(side * 0.45, 1.0, -AUTO_CUT_Z);
+          const restV = _to.set(side * 0.45, 1.0, -AUTO_CUT_Z);
           const f = Math.max(0, Math.min(1, (t - fromT) / 0.4));
           tip = from.lerp(restV, f * f * (3 - 2 * f));
         }
@@ -732,7 +737,7 @@ export class Game {
     this.lastFrame = nowMs;
     const xr = this.renderer.xr.isPresenting;
     const t = this.audio.time;
-    const inGame = ['ready', 'playing', 'paused', 'finished'].includes(this.state);
+    const inGame = IN_GAME.has(this.state);
 
     if (xr) {
       this.pollXRButtons();

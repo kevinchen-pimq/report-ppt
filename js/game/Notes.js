@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { NoteStyle, createEdgeGlowMaterial, wallStyleParams, ARROW_PLANE, arrowTexture, dotTexture } from './Models.js';
 import {
   NOTE_SIZE, COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, WALL_UNIT, LANE_W,
@@ -25,6 +26,28 @@ const _n = new THREE.Vector3();
 const _tmp = new THREE.Vector3();
 const _box = new THREE.Box3();
 const _white = new THREE.Color(0xffffff);
+const _evalVel = new THREE.Vector3();
+const AXES = ['x', 'y', 'z'];
+
+/** Bomb body + spikes merged into one geometry: one draw call per bomb instead of nine. */
+function makeBombGeometry() {
+  const parts = [new THREE.IcosahedronGeometry(0.2, 0)];
+  const spike = new THREE.ConeGeometry(0.04, 0.16, 6).toNonIndexed();
+  const up = new THREE.Vector3(0, 1, 0);
+  const m = new THREE.Matrix4();
+  const q = new THREE.Quaternion();
+  const dirs = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [0.6, 0.6, 0.5], [-0.6, -0.6, -0.5]];
+  for (const d of dirs) {
+    const v = new THREE.Vector3(...d).normalize();
+    q.setFromUnitVectors(up, v);
+    m.compose(v.clone().multiplyScalar(0.2), q, new THREE.Vector3(1, 1, 1));
+    parts.push(spike.clone().applyMatrix4(m));
+  }
+  const merged = mergeGeometries(parts, false);
+  for (const g of parts) g.dispose();
+  spike.dispose();
+  return merged;
+}
 
 function makeArrowGeometry() {
   const s = NOTE_SIZE;
@@ -38,7 +61,7 @@ function segmentHitsBox(p0, p1, box) {
   // Slab test for segment p0->p1 against an AABB
   let tmin = 0;
   let tmax = 1;
-  for (const ax of ['x', 'y', 'z']) {
+  for (const ax of AXES) {
     const d = p1[ax] - p0[ax];
     if (Math.abs(d) < 1e-9) {
       if (p0[ax] < box.min[ax] || p0[ax] > box.max[ax]) return false;
@@ -78,12 +101,15 @@ export class NoteManager {
     // per-colour symbols for styles that draw arrows in the note colour (outline)
     this.colorArrowMats = [0, 1].map(() => symbol(arrowTexture()));
     this.colorDotMats = [0, 1].map(() => symbol(dotTexture()));
-    this.bombGeo = new THREE.IcosahedronGeometry(0.2, 0);
+    this.bombGeo = makeBombGeometry();
     this.bombMat = new THREE.MeshStandardMaterial({ color: 0x2a2a30, roughness: 0.3, metalness: 0.8, flatShading: true, emissive: 0x220008 });
-    this.spikeGeo = new THREE.ConeGeometry(0.04, 0.16, 6);
 
     this.wallGeo = new THREE.BoxGeometry(1, 1, 1);
     this.wallMat = createEdgeGlowMaterial({ color: COLOR_WALL, ...wallStyleParams('translucent') });
+
+    // Gameplay options (settings: showWalls / showBombs)
+    this.showWalls = true;
+    this.showBombs = true;
 
     this.pools = { bomb: [], wall: [] }; // notes / links are pooled per colour: 'note0', 'link1', …
     this.active = [];
@@ -122,6 +148,23 @@ export class NoteManager {
     u.fill.value = p.fill;
     u.edge.value = p.edge;
     u.intensity.value = p.intensity;
+  }
+
+  /** Turns walls / bombs on or off; switching off removes the ones already on screen. */
+  setOptions({ walls = true, bombs = true } = {}) {
+    this.showWalls = walls;
+    this.showBombs = bombs;
+    if (!walls && this.activeWalls.length) {
+      for (const w of this.activeWalls) this.releaseWall(w);
+      this.activeWalls = [];
+    }
+    if (!bombs) {
+      for (let i = this.active.length - 1; i >= 0; i--) {
+        if (this.active[i].kind !== 'bomb') continue;
+        this.release(this.active[i]);
+        this.active.splice(i, 1);
+      }
+    }
   }
 
   poolKey(kind, color) {
@@ -178,14 +221,6 @@ export class NoteManager {
     if (kind === 'bomb') {
       const body = new THREE.Mesh(this.bombGeo, this.bombMat);
       group.add(body);
-      const dirs = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1], [0.6, 0.6, 0.5], [-0.6, -0.6, -0.5]];
-      for (const d of dirs) {
-        const spike = new THREE.Mesh(this.spikeGeo, this.bombMat);
-        const v = new THREE.Vector3(...d).normalize();
-        spike.position.copy(v).multiplyScalar(0.2);
-        spike.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v);
-        group.add(spike);
-      }
       obj.body = body;
     } else if (kind === 'link') {
       const built = this.style.buildLink(color);
@@ -287,12 +322,13 @@ export class NoteManager {
     while (this.noteIdx < notes.length && notes[this.noteIdx].time - this.spawnLead <= t) {
       const n = notes[this.noteIdx++];
       if (n.time < t - 0.3) continue; // skip notes far in the past (seeking)
+      if (n.kind === 'bomb' && !this.showBombs) continue;
       this.active.push(this.acquire(n));
     }
     const walls = this.map.walls;
     while (this.wallIdx < walls.length && walls[this.wallIdx].time - this.spawnLead <= t) {
       const w = walls[this.wallIdx++];
-      if (w.endTime < t) continue;
+      if (w.endTime < t || !this.showWalls) continue;
       this.activeWalls.push(this.acquireWall(w));
     }
 
@@ -300,7 +336,6 @@ export class NoteManager {
     for (let i = this.active.length - 1; i >= 0; i--) {
       const obj = this.active[i];
       const z = this.positionNote(obj, t);
-      obj.group.updateMatrixWorld(true);
       if (!obj.done) {
         if (autoplay) {
           const lead = 0.55 / this.baseNjs;
@@ -382,7 +417,7 @@ export class NoteManager {
           if (obj.kind === 'bomb') {
             obj.done = true;
             obj.cut = true;
-            this.effects.spawnSparks(p, new THREE.Color(0xffffff), 60, 4);
+            this.effects.spawnSparks(p, _white, 60, 4);
             this.cb.onBomb(obj.note, saber);
           } else {
             const res = this.evaluate(obj, saber);
@@ -406,7 +441,7 @@ export class NoteManager {
   /** Judges a saber touching a note: colour, direction and speed. */
   evaluate(obj, saber, autoplay = false) {
     const note = obj.note;
-    const vel = saber.tipVelocity(new THREE.Vector3());
+    const vel = saber.tipVelocity(_evalVel);
     const speed = Math.hypot(vel.x, vel.y);
     let good = true;
     let reason = '';

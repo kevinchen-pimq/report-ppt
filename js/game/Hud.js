@@ -62,7 +62,15 @@ export class Hud {
       this.popups.push({ panel: p, life: 0, vel: new THREE.Vector3() });
     }
     this.popupNext = 0;
-    this.lastKey = '';
+    this.resetKeys();
+  }
+
+  /** Forces every HUD panel to redraw on the next update. */
+  resetKeys() {
+    // what each panel last showed: a panel is redrawn (and its texture re-uploaded) only when it changes
+    this.lastLeft = [NaN, NaN, NaN, NaN];
+    this.lastRight = [NaN, NaN, NaN, NaN];
+    this.lastBottom = [NaN, NaN, NaN, NaN];
   }
 
   setVisible(v) {
@@ -70,13 +78,10 @@ export class Hud {
   }
 
   update(score, progress, songTime, duration, dt) {
-    const key = [score.score, score.combo, score.multiplier, score.progress, score.energy.toFixed(3), Math.floor(songTime), score.rank].join('|');
-    if (key !== this.lastKey) {
-      this.lastKey = key;
-      this.drawLeft(score);
-      this.drawRight(score);
-      this.drawBottom(score, songTime, duration);
-    }
+    if (changed(this.lastLeft, score.combo, score.misses + score.badCuts)) this.drawLeft(score);
+    // score + possibleSoFar determine the accuracy % and rank shown
+    if (changed(this.lastRight, score.score, score.multiplier, score.progress, score.possibleSoFar)) this.drawRight(score);
+    if (changed(this.lastBottom, Math.round(score.energy * 1000), Math.floor(songTime), duration)) this.drawBottom(score, songTime, duration);
     for (const p of this.popups) {
       if (p.life <= 0) continue;
       p.life -= dt;
@@ -183,6 +188,16 @@ export class Hud {
       p.panel.mesh.visible = false;
     }
   }
+}
+
+/** Stores the values in `last` and reports whether any of them changed. */
+function changed(last, a, b, c, d) {
+  if (last[0] === a && last[1] === b && last[2] === c && last[3] === d) return false;
+  last[0] = a;
+  last[1] = b;
+  last[2] = c;
+  last[3] = d;
+  return true;
 }
 
 function fmt(t) {
