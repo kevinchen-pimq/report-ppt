@@ -254,6 +254,13 @@ html, body {
 .results li .r-state { margin-left: auto; font-size: 12px; white-space: nowrap; color: var(--accent, #8cb4ff); }
 .results li .r-state.ok { color: #60ffa0; }
 .results li.missing { opacity: 0.5; cursor: default; }
+.results li .pv-btn {
+  flex: none; width: 36px; height: 36px; border-radius: 50%; padding: 0;
+  border: 1px solid var(--border); background: rgba(124, 156, 255, 0.16); color: #fff;
+  font-size: 13px; cursor: pointer;
+}
+.results li .pv-btn:hover { background: rgba(124, 156, 255, 0.42); }
+.results li .pv-btn.playing { background: linear-gradient(90deg, #ff4d5e, #3d8bff); border-color: transparent; }
 .site-footer { margin: 24px 0 8px; text-align: center; color: var(--muted); font-size: 13px; }
 .site-footer a { color: inherit; }
 

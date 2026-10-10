@@ -45,6 +45,7 @@ export class GameAudio {
   setVolume(v) {
     this.volume = v;
     if (this.master) this.master.gain.value = v;
+    if (this.previewEl) this.previewEl.volume = Math.max(0, Math.min(1, v));
   }
 
   setSfxVolume(v) {
@@ -145,7 +146,32 @@ export class GameAudio {
     this.previewNode = { src, g };
   }
 
+  /**
+   * BeatSaver's short preview clip, before the song is downloaded. Played with an
+   * <audio> element: BeatSaver doesn't allow Web Audio to read it (no CORS), and
+   * plain playback doesn't need that. Resolves false if stopped while starting.
+   */
+  async playRemotePreview(url) {
+    this.stopPreview(0.05);
+    const token = this.previewToken;
+    const el = new Audio();
+    el.loop = true;
+    el.volume = Math.max(0, Math.min(1, this.volume));
+    el.src = url;
+    this.previewEl = el;
+    await el.play();
+    return token === this.previewToken;
+  }
+
   stopPreview(fade = 0.3) {
+    this.previewToken = (this.previewToken || 0) + 1;
+    const el = this.previewEl;
+    if (el) {
+      this.previewEl = null;
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
+    }
     const p = this.previewNode;
     if (!p) return;
     this.previewNode = null;

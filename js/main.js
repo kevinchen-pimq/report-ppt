@@ -341,7 +341,7 @@ async function runSearch(query, sortOrder) {
       const secs = String((m.metadata?.duration || 0) % 60).padStart(2, '0');
       meta.textContent = `${m.metadata?.songAuthorName || ''} · ${m.metadata?.levelAuthorName || ''} · ${mins}:${secs} · ${diffs}${library.isDownloaded(m) ? ' · ✓ 已下載' : ''}`;
       div.append(title, meta);
-      li.append(img, div);
+      li.append(previewButton(m), img, div);
       li.addEventListener('click', () => loadBeatSaverMap(m).catch((e) => status(e.message, { error: true })));
       list.append(li);
     }
@@ -368,9 +368,10 @@ for (const chip of document.querySelectorAll('.chip[data-sort]')) {
 let openPl = null; // playlist shown in the detail view
 let plBusy = false;
 
-function plItem({ cover, title, meta, state, stateOk, onClick, onDelete, missing }) {
+function plItem({ cover, title, meta, state, stateOk, onClick, onDelete, missing, preview }) {
   const li = document.createElement('li');
   if (missing) li.className = 'missing';
+  if (preview) li.append(previewButton(preview));
   const img = document.createElement('img');
   img.loading = 'lazy';
   img.alt = '';
@@ -455,6 +456,7 @@ function renderPlaylistDetail() {
       state: doc === null ? '' : have ? '✓ 已下載' : '下載',
       stateOk: have,
       missing: doc === null,
+      preview: doc || null,
       onClick: doc === null ? null : () => playlistSong(s),
     }));
   });
@@ -576,6 +578,27 @@ function syncPreviewButton(st = game.previewState) {
   const mine = current && st.entry === current.entry;
   btn.textContent = mine && st.loading ? '載入中…' : mine && st.playing ? '❚❚ 暫停' : '▶ 試聽';
   btn.classList.toggle('playing', !!(mine && st.playing));
+  for (const b of document.querySelectorAll('.pv-btn')) paintPreviewButton(b, st);
+}
+
+// Small ▶ button on BeatSaver songs: plays BeatSaver's preview clip before downloading
+function previewButton(doc) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'pv-btn';
+  b.dataset.key = `bsdoc:${doc.id}`;
+  b.title = '試聽（不用下載）';
+  b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    game.togglePreview(doc);
+  });
+  paintPreviewButton(b);
+  return b;
+}
+function paintPreviewButton(b, st = game.previewState) {
+  const mine = st.key === b.dataset.key;
+  b.textContent = mine && st.loading ? '…' : mine && st.playing ? '❚❚' : '▶';
+  b.classList.toggle('playing', !!(mine && st.playing));
 }
 $('preview-btn').addEventListener('click', () => {
   if (current) game.togglePreview(current.entry);

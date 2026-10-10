@@ -12,6 +12,7 @@ import { Menu } from './Menu.js';
 import { Pointers } from './ui/Pointers.js';
 import { LatencyCalibrator } from './Calibration.js';
 import { settings } from '../settings.js';
+import { latestVersion } from '../beatsaver.js';
 import { parseModel, modelStore } from './Models.js';
 import { COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, laneX, layerY, noteRotation, rotationToDir, setPlayerHeight } from './constants.js';
 
@@ -202,34 +203,53 @@ export class Game {
   }
 
   // ---------------------------------------------------------------------------
-  // Song preview (song pages on the web page and in the VR menu)
-  previewState = { entry: null, loading: false, playing: false };
+  // Song preview: a saved song (library entry, loops its preview section) or a
+  // BeatSaver map not downloaded yet (map doc, plays BeatSaver's short clip).
+  // previewState.key identifies either: entry.key or `bsdoc:<map id>`.
+  previewState = { entry: null, key: null, loading: false, playing: false };
 
-  isPreviewing(entry) {
-    return this.previewState.entry === entry && (this.previewState.playing || this.previewState.loading);
+  static previewKey(target) {
+    if (!target) return null;
+    return target.versions ? `bsdoc:${target.id}` : target.key;
   }
 
-  /** Play / pause the preview of a song. */
-  async togglePreview(entry) {
-    if (this.isPreviewing(entry)) {
+  isPreviewing(target) {
+    const st = this.previewState;
+    return !!target && st.key === Game.previewKey(target) && (st.playing || st.loading);
+  }
+
+  /** Play / pause the preview of a song (library entry or BeatSaver map doc). */
+  async togglePreview(target) {
+    if (this.isPreviewing(target)) {
       this.stopPreview();
       return;
     }
     this.stopPreview();
-    this.previewState = { entry, loading: true, playing: false };
+    const key = Game.previewKey(target);
+    this.previewState = { entry: target, key, loading: true, playing: false };
     this.emitPreview();
+    const cancelled = () => this.previewState.key !== key || !this.previewState.loading;
     try {
-      await this.library.load(entry);
-      const buffer = await this.library.audioFor(entry, this.audio);
-      if (this.previewState.entry !== entry || !this.previewState.loading) return; // cancelled meanwhile
-      const info = entry.info;
-      const start = info.previewStart > 0 && info.previewStart < buffer.duration - 3 ? info.previewStart : buffer.duration * 0.3;
-      this.audio.playPreview(buffer, start, info.previewDuration > 3 ? info.previewDuration : 15);
-      this.previewState = { entry, loading: false, playing: true };
+      if (target.versions) {
+        const url = latestVersion(target)?.previewURL;
+        if (!url) throw new Error('這首歌沒有試聽片段');
+        if (!(await this.audio.playRemotePreview(url)) || cancelled()) return;
+      } else {
+        await this.library.load(target);
+        const buffer = await this.library.audioFor(target, this.audio);
+        if (cancelled()) return;
+        const info = target.info;
+        const start = info.previewStart > 0 && info.previewStart < buffer.duration - 3 ? info.previewStart : buffer.duration * 0.3;
+        this.audio.playPreview(buffer, start, info.previewDuration > 3 ? info.previewDuration : 15);
+      }
+      this.previewState = { entry: target, key, loading: false, playing: true };
     } catch (e) {
+      if (cancelled()) return; // stopped while starting
       console.error(e);
-      this.previewState = { entry: null, loading: false, playing: false };
+      this.audio.stopPreview(0);
+      this.previewState = { entry: null, key: null, loading: false, playing: false };
       this.hooks.onError?.(e);
+      if (this.state === 'menu') this.menu?.setStatus(`試聽失敗：${e.message}`);
     }
     this.emitPreview();
   }
@@ -237,7 +257,7 @@ export class Game {
   stopPreview() {
     if (!this.previewState.entry) return;
     this.audio.stopPreview();
-    this.previewState = { entry: null, loading: false, playing: false };
+    this.previewState = { entry: null, key: null, loading: false, playing: false };
     this.emitPreview();
   }
 

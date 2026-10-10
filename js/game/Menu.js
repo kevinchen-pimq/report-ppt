@@ -405,6 +405,7 @@ export class Menu {
         const v = latestVersion(doc);
         this.rowBg(p, `bs-${doc.id}`, CX, y, rowW, 88, () => this.downloadMap(doc));
         p.image(this.cover(v?.coverURL), CX + 8, y + 8, 72, 72, 10);
+        this.previewOnCover(p, doc, CX + 8, y + 8, 72);
         const have = this.library.isDownloaded(doc);
         p.text(doc.name, CX + 96, y + 38, { size: 30, weight: 700, maxWidth: rowW - (have ? 250 : 120) });
         if (have) p.text('✓ 已下載', CX + rowW - 20, y + 38, { size: 24, color: THEME.green, align: 'right' });
@@ -533,6 +534,18 @@ export class Menu {
     this.downloading = false;
   }
 
+  /** ▶ / ❚❚ over a BeatSaver song's cover: BeatSaver's preview clip, before downloading. */
+  previewOnCover(p, doc, x, y, size) {
+    const pv = this.game.previewState;
+    const mine = pv.key === `bsdoc:${doc.id}`;
+    p.button(`pv-${doc.id}`, x, y, size, size, mine && pv.loading ? '…' : mine && pv.playing ? '❚❚' : '▶', {
+      size: mine && pv.playing ? 22 : 30,
+      radius: 10,
+      active: mine && pv.playing,
+      onClick: () => this.game.togglePreview(doc),
+    });
+  }
+
   plCover(pl) {
     // the playlist's own image, or (if it can't load) its first song's cover
     const img = this.cover(pl.cover);
@@ -619,6 +632,7 @@ export class Menu {
       this.rowBg(p, `pls-${v.scroll + i}`, CX, y, rowW, 84, missing ? null : () => this.playlistSong(s));
       const cover = doc ? latestVersion(doc)?.coverURL : null;
       p.image(this.cover(cover), CX + 8, y + 8, 68, 68, 8);
+      if (doc) this.previewOnCover(p, doc, CX + 8, y + 8, 68);
       p.text(`${v.scroll + i + 1}. ${doc?.name || s.name || s.hash}`, CX + 90, y + 36, { size: 28, weight: 700, color: missing ? THEME.muted : THEME.text, maxWidth: rowW - 260 });
       p.text(doc ? `${doc.metadata?.songAuthorName || ''} · ${doc.metadata?.levelAuthorName || s.mapper || ''}` : missing ? 'BeatSaver 上找不到這首歌' : '讀取中…', CX + 90, y + 70, { size: 22, color: THEME.muted, maxWidth: rowW - 260 });
       const status = missing ? '' : store.isDownloaded(s) ? '✓ 已下載' : '下載';
@@ -634,6 +648,7 @@ export class Menu {
 
   // ----- song details -------------------------------------------------------------
   openSong(entry, setIdx, diffIdx) {
+    if (this.game.previewState.entry && this.game.previewState.entry !== entry) this.game.stopPreview();
     if (entry.stub) {
       // saved song: load its files from browser storage first
       this.setStatus(`讀取中：${entry.info.title}…`, true);
