@@ -247,7 +247,7 @@ export class Menu {
 
   renderSidebar(p) {
     p.text('WebXR', 30, 68, { size: 34, weight: 900, color: '#ff4d5e' });
-    p.text('Saber', 136, 68, { size: 34, weight: 900, color: '#59b0f4' });
+    p.text('Saber', 30 + p.ctx.measureText('WebXR ').width, 68, { size: 34, weight: 900, color: '#59b0f4' });
     const items = [
       ['library', `歌曲庫 (${this.library.entries.length})`],
       ['playlists', `歌單 (${this.game.playlists?.items.length || 0})`],
