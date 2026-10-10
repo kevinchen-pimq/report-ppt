@@ -240,7 +240,13 @@ export default {
       const coil = rimBank.add(trs([x, COIL[0] + 0.18, z], [Math.PI / 2, 0, 0], [COIL[1], COIL[1], 1]));
       lights.push(new MultiLight([...main, ...fork, coil]));
       // the coil disc moves (events 12 / 13 / 16-19): its body is an instance, its rim a light
-      coils.push({ x, z, type, rim: coil.index, body: coilBodies.add(trs([x, COIL[0], z], [0, 0, 0], [COIL[1], 0.35, COIL[1]])), y: COIL[0], target: COIL[0] });
+      coils.push({
+        x, z, type, y: COIL[0], target: COIL[0], rim: coil.index,
+        body: coilBodies.add(trs([x, COIL[0], z], [0, 0, 0], [COIL[1], 0.35, COIL[1]])),
+        // rest matrices: only their translation changes while the coil moves
+        bodyM: trs([x, COIL[0], z], [0, 0, 0], [COIL[1], 0.35, COIL[1]]),
+        rimM: trs([x, COIL[0] + 0.18, z], [Math.PI / 2, 0, 0], [COIL[1], COIL[1], 1]),
+      });
       groups[type].push(...lights);
     }
     // groups 2 / 3: small vertical bars beside the runway piers (near pair, far pair)
@@ -281,8 +287,10 @@ export default {
           if (Math.abs(c.target - c.y) < 1e-3) continue;
           c.y += (c.target - c.y) * k;
           if (Math.abs(c.target - c.y) < 1e-3) c.y = c.target;
-          coilBodies.setMatrix(c.body, trs([c.x, c.y, c.z], [0, 0, 0], [COIL[1], 0.35, COIL[1]], m4));
-          rimBank.setMatrix(c.rim, trs([c.x, c.y + 0.18, c.z], [Math.PI / 2, 0, 0], [COIL[1], COIL[1], 1], m4));
+          c.bodyM.elements[13] = c.y;
+          c.rimM.elements[13] = c.y + 0.18;
+          coilBodies.setMatrix(c.body, c.bodyM);
+          rimBank.setMatrix(c.rim, c.rimM);
         }
       },
       dispose() {

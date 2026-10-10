@@ -31,6 +31,7 @@
   - **NJS 變速事件**（v4 `njsEvents`，含緩動曲線）：方塊速度隨譜面變化，反應時間不變
   - **譜面自訂顏色**：v2.1 / v4 `colorSchemes`、v2 難度 `_customData`（`_colorLeft`、`_envColorLeft`、`_obstacleColor`…），可在設定中關閉
   - **Chroma**（v2 `_customData` / v3 `customData`，可在設定中關閉）：方塊、炸彈、牆壁、弧線與鏈的顏色；燈光事件的顏色、`lightID`（依原版場景的燈數按比例對應到本遊戲的燈）、`_lightGradient` 漸層、緩動（easing）與 HSV 漸變、v3 過渡事件；光環旋轉 / 縮放（`rotation`、`step`、`prop`、`speed`、`direction`…）、雷射速度（`speed`、`direction`、`lockRotation`）；Chroma 1 的 RGB 燈光事件。場景改造（`environment`）、Noodle Extensions、Vivify 不支援（會被忽略）
+  - **官方場景**：譜面指定的官方場景（Info.dat 的 `environmentName`）會用重製的版本顯示（23 個，例如 The First、Timbaland、BTS、Billie Eilish、Lady Gaga…；v3 群組燈光的新場景還沒有，用預設場景）。燈光、光環、雷射與各場景的特殊事件（Billie 的雨、Lady Gaga 的線圈高度、BTS 的柱子、Interscope 的車…）都會動；設定「場景」可改成永遠用預設場景或固定一個場景
   - Standard、OneSaber、NoArrows、Lawless、Lightshow 等譜面特性（360/90 度的旋轉事件會被忽略）
 - **遊玩**
   - 左手紅劍、右手藍劍，依箭頭方向揮砍；判定顏色、方向、揮劍速度
@@ -76,7 +77,9 @@
 
 設定（網頁與 VR 選單共用並自動儲存）：不會失敗、自動遊玩、譜面自訂顏色、Chroma 燈光與顏色、顯示牆壁 / 炸彈 / 切開的方塊（可關閉）、顯示幀率（FPS，畫面左下角，VR 裡也看得到；綠色＝順暢、黃色＝稍慢、紅色＝明顯掉幀）、
 VR 渲染解析度（50%～150%，下次進入 VR 生效；調低更順、調高更清楚）、VR 更新率（自動 / 72 / 80 / 90 / 120 Hz，依頭盔支援）、身高、音訊延遲、音量、打擊音效、
-光劍角度（光劍相對手把的傾斜）、光劍顏色、觀戰畫面、光劍 / 方塊模型、牆壁樣式。
+光劍角度（光劍相對手把的傾斜）、光劍顏色、觀戰畫面、光劍 / 方塊模型、牆壁樣式、場景（自動＝依譜面 / 預設場景 / 固定一個場景）。
+
+顏色的優先順序（每個顏色各自決定）：譜面自訂顏色（設定開啟時）→ 自己改過的光劍顏色（和預設不同時）→ 官方場景的預設配色 → 遊戲預設顏色。
 
 ### 自訂模型規格
 
@@ -151,7 +154,8 @@ js/game/Calibration.js  音訊延遲節拍測試
 js/game/Saber.js        光劍、軌跡、速度與揮劍角度追蹤
 js/game/Models.js       光劍 / 方塊 / 牆壁樣式、邊框發光著色器、自訂 glTF 模型載入與儲存
 js/game/Score.js        計分、連擊倍率、血量
-js/game/Environment.js  場景與燈光事件
+js/game/Environment.js  預設場景與燈光事件；官方場景模組的載入、顯示與燈光
+js/game/envs/           官方場景重製模組（一個場景一個檔，規格見 envs/CONTRACT.md，共用工具 envs/kit.js）
 js/game/ChromaLighting.js  Chroma 燈光：逐燈狀態、漸層、過渡、光環與雷射動作（只透過 set(r, g, b) 控制燈）
 js/game/lightIds.js     原版各場景每組燈數（Chroma lightID 對應用）
 js/game/FpsMeter.js     幀率顯示（跟著視線的小面板，每 0.5 秒更新）

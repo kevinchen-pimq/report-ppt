@@ -809,6 +809,7 @@ export class Menu {
     p.text(info.subTitle, tx, 140, { size: 28, color: THEME.muted, maxWidth: CW - 260 });
     p.text(info.artist, tx, 185, { size: 32, maxWidth: CW - 260 });
     p.text(`譜師 ${info.mapper || '-'} · BPM ${Math.round(info.bpm * 100) / 100}`, tx, 230, { size: 26, color: THEME.muted, maxWidth: CW - 260 });
+    if (s.preview) p.text(environmentText(s.preview.meta.environment, settings.get('environment')), tx, 266, { size: 24, color: THEME.accent, maxWidth: CW - 260 });
 
     info.sets.forEach((set, i) => {
       p.button(`char-${i}`, CX + i * 196, 285, 184, 56, set.characteristic, {
@@ -834,7 +835,6 @@ export class Menu {
       });
     });
     if (s.preview) {
-      p.text(environmentText(s.preview.meta.environment, settings.get('environment')), CX, 456, { size: 24, color: THEME.muted, maxWidth: CW });
       const m = s.preview.map;
       const st = mapStats(m);
       p.text(`方塊 ${m.colorNotes} · 鏈 ${m.links} · 弧線 ${m.arcs.length} · 炸彈 ${st.bombs} · 牆 ${m.walls.length}`, CX, 480, { size: 26, color: THEME.muted });
@@ -959,10 +959,10 @@ export class Menu {
     if (names.note) p.text(`自訂方塊：${names.note}`, CX + 150, 360, { size: 22, color: THEME.muted, maxWidth: 520 });
     this.chipRow(p, 'ap-wall', 410, '牆壁', WALL_STYLES, s.wallStyle, (v) => settings.set({ wallStyle: v }));
     this.environmentRow(p, 500, s.environment || 'auto');
-    p.text('自訂模型：在網頁的「外觀」區上傳 glTF 2.0（.glb）檔，會保存在這個瀏覽器中。', CX, 625, { size: 24, color: THEME.muted, maxWidth: CW });
-    p.text('光劍：最長的軸會當成劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。', CX, 662, { size: 22, color: THEME.muted, maxWidth: CW });
-    p.text('方塊：模型正面朝 +Z，會自動縮放置中並套用方塊顏色。', CX, 694, { size: 22, color: THEME.muted, maxWidth: CW });
-    p.text('變更立即套用；遊戲中途變更則在下一首歌開始時生效', CX, 735, { size: 22, color: THEME.accent });
+    p.text('自訂模型：在網頁的「外觀」區上傳 glTF 2.0（.glb）檔，會保存在這個瀏覽器中。', CX, 648, { size: 24, color: THEME.muted, maxWidth: CW });
+    p.text('光劍：最長的軸會當成劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。', CX, 682, { size: 22, color: THEME.muted, maxWidth: CW });
+    p.text('方塊：模型正面朝 +Z，會自動縮放置中並套用方塊顏色。', CX, 712, { size: 22, color: THEME.muted, maxWidth: CW });
+    p.text('變更立即套用；遊戲中途變更則在下一首歌開始時生效', CX, 752, { size: 22, color: THEME.accent });
   }
 
   /** Scene chooser: auto (the map's environment) / our default / ◀ one environment ▶. */
@@ -984,7 +984,7 @@ export class Menu {
     });
     p.button('ap-env-next', CX + 880, y, 64, 64, '▶', { size: 26, onClick: () => pick(1) });
     p.text(cur === 'auto' ? '使用譜面指定的官方場景（還沒做好的用預設場景）' : cur === 'default' ? '每首歌都用預設場景' : `每首歌都用「${envLabel(cur)}」場景`,
-      CX + 150, y + 98, { size: 22, color: THEME.muted, maxWidth: CW - 150 });
+      CX + 150, y + 96, { size: 22, color: THEME.muted, maxWidth: CW - 150 });
   }
 
   // ----- calibration ------------------------------------------------------------
