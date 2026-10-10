@@ -5,6 +5,7 @@ import { searchMaps, mapById, latestVersion, download, searchPlaylists, parsePla
 import { Playlists } from './playlists.js';
 import { DIFF_NAMES } from './mapLoader.js';
 import { StylePreview } from './stylePreview.js';
+import { downloads } from './downloads.js';
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');
@@ -253,6 +254,122 @@ function coverButton(target, src) {
   return b;
 }
 
+// ---------------------------------------------------------------------------
+// Downloads: the 下載中 panel, the top-bar badge and the state label on song rows
+const ACTIVE = ['queued', 'downloading', 'paused'];
+const pct = (j) => (j.total ? `${Math.min(99, Math.floor((j.received / j.total) * 100))}%` : '');
+
+/** Row label that follows a download job: 下載 / 排隊中 / 45% / 已暫停 / ✓ 已下載. */
+function jobState(id) {
+  const s = document.createElement('span');
+  s.className = 'r-state';
+  s.dataset.job = id || '';
+  paintJobState(s);
+  return s;
+}
+function paintJobState(s) {
+  const id = s.dataset.job;
+  const j = id && downloads.get(id);
+  const have = !!id && library.has(id);
+  let text = '下載';
+  if (j && j.state === 'queued') text = '排隊中';
+  else if (j && j.state === 'paused') text = `已暫停 ${pct(j)}`.trim();
+  else if (j && j.state === 'downloading') text = j.total && j.received >= j.total ? '儲存中…' : pct(j) || '下載中';
+  else if (have) text = '✓ 已下載';
+  s.textContent = text;
+  s.classList.toggle('ok', have && !(j && ACTIVE.includes(j.state)));
+  s.classList.toggle('busy', !!(j && ACTIVE.includes(j.state)));
+}
+
+// Rows are kept per job and updated in place, so the buttons stay put while progress ticks.
+const dlRows = new Map(); // job id -> { li, fill, meta, pause, cancel }
+function dlRow(j) {
+  const li = document.createElement('li');
+  const img = document.createElement('img');
+  img.alt = '';
+  if (j.cover) img.src = j.cover;
+  const body = document.createElement('div');
+  body.className = 'dl-body';
+  const t = document.createElement('div');
+  t.className = 'r-title';
+  t.textContent = j.label;
+  const bar = document.createElement('div');
+  bar.className = 'dl-bar';
+  const fill = document.createElement('i');
+  bar.append(fill);
+  const meta = document.createElement('div');
+  meta.className = 'r-meta';
+  body.append(t, bar, meta);
+  const pause = document.createElement('button');
+  pause.type = 'button';
+  pause.className = 'btn small';
+  pause.addEventListener('click', () => {
+    const job = downloads.get(j.id);
+    if (job?.state === 'paused') downloads.resume(j.id);
+    else downloads.pause(j.id);
+  });
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'btn small ghost';
+  cancel.textContent = '取消';
+  cancel.addEventListener('click', () => downloads.cancel(j.id));
+  li.append(img, body, pause, cancel);
+  return { li, fill, meta, pause, cancel };
+}
+
+function renderDownloads() {
+  const jobs = downloads.list();
+  const active = jobs.filter((j) => ACTIVE.includes(j.state));
+  $('dl-badge').hidden = !active.length;
+  $('dl-count').textContent = active.length;
+  $('downloads').hidden = !jobs.length;
+  const ul = $('downloads-list');
+  const ids = new Set(jobs.map((j) => j.id));
+  for (const [id, row] of dlRows) {
+    if (!ids.has(id)) {
+      row.li.remove();
+      dlRows.delete(id);
+    }
+  }
+  jobs.forEach((j, i) => {
+    let row = dlRows.get(j.id);
+    if (!row) {
+      row = dlRow(j);
+      dlRows.set(j.id, row);
+    }
+    if (ul.children[i] !== row.li) ul.insertBefore(row.li, ul.children[i] || null); // only moves when the order changed
+    row.li.className = `dl-item ${j.state}`;
+    row.fill.style.width = `${j.state === 'done' ? 100 : j.total ? Math.min(100, (j.received / j.total) * 100) : 0}%`;
+    row.meta.textContent = {
+      queued: '排隊中',
+      downloading: j.total && j.received >= j.total ? '儲存中…' : `下載中 ${pct(j)}${j.total ? ` · ${fmtMB(j.received)} / ${fmtMB(j.total)}` : ''}`,
+      paused: `已暫停 ${pct(j)}`,
+      done: '✓ 完成',
+      error: `失敗：${j.error || ''}`,
+      cancelled: '已取消',
+    }[j.state];
+    const live = ACTIVE.includes(j.state);
+    row.pause.hidden = !live;
+    row.cancel.hidden = !live;
+    row.pause.textContent = j.state === 'paused' ? '繼續' : '暫停';
+  });
+}
+
+let dlFrame = 0;
+downloads.subscribe(() => {
+  if (dlFrame) return;
+  dlFrame = requestAnimationFrame(() => {
+    dlFrame = 0;
+    renderDownloads();
+    for (const s of document.querySelectorAll('.r-state[data-job]')) paintJobState(s);
+    paintPlaylistButtons();
+  });
+});
+$('dl-badge').addEventListener('click', () => {
+  showTab('find');
+  $('downloads').scrollIntoView({ behavior: 'smooth', block: 'start' });
+});
+
 $('preview-btn').addEventListener('click', () => {
   if (current) game.togglePreview(current.entry);
 });
@@ -266,6 +383,10 @@ async function addAndSelect(promise, label) {
     status(`已載入：${entry.info.title}${label ? `（${label}）` : ''}`);
     return entry;
   } catch (e) {
+    if (e.name === 'AbortError') {
+      status(`已取消下載${label ? `：${label}` : ''}`);
+      return null;
+    }
     console.error(e);
     status(`載入失敗：${e.message}`, { error: true });
     return null;
@@ -404,13 +525,28 @@ function forgetDeepLink(entry) {
 
 // ---------------------------------------------------------------------------
 // BeatSaver
+// Several songs can download at once (see the 下載中 panel); when one finishes, only the
+// song clicked last is opened, the others just report that they are ready.
+let lastRequested = null;
 async function loadBeatSaverMap(doc) {
-  status(`下載中：${doc.name}…`, { sticky: true });
-  const entry = await addAndSelect(
-    library.addBeatSaver(doc, (p) => status(`下載中：${doc.name} ${Math.round(p * 100)}%`, { sticky: true })),
-    `BeatSaver ${doc.id}`,
-  );
-  if (!entry) return;
+  const key = library.beatSaverKey(doc);
+  lastRequested = key;
+  const saved = library.has(key);
+  if (!saved) status(`開始下載：${doc.name}`);
+  let entry;
+  try {
+    entry = await library.addBeatSaver(doc);
+  } catch (e) {
+    if (e.name === 'AbortError') status(`已取消下載：${doc.name}`);
+    else status(`下載失敗：${doc.name}（${e.message}）`, { error: true });
+    return;
+  }
+  if (lastRequested !== key) {
+    status(`已下載：${entry.info.title}`);
+    return;
+  }
+  await selectEntry(entry, undefined, undefined, { open: true });
+  status(`已載入：${entry.info.title}`);
   try {
     const url = new URL(location.href);
     url.searchParams.set('id', doc.id);
@@ -454,11 +590,7 @@ function renderResults() {
     const secs = String((m.metadata?.duration || 0) % 60).padStart(2, '0');
     meta.textContent = `${m.metadata?.songAuthorName || ''} · ${m.metadata?.levelAuthorName || ''} · ${mins}:${secs} · ${diffs}`;
     div.append(title, meta);
-    const have = library.isDownloaded(m);
-    const state = document.createElement('span');
-    state.className = `r-state${have ? ' ok' : ''}`;
-    state.textContent = have ? '✓ 已下載' : '下載';
-    li.append(coverButton(m, v?.coverURL), div, state);
+    li.append(coverButton(m, v?.coverURL), div, jobState(library.beatSaverKey(m)));
     li.addEventListener('click', () => loadBeatSaverMap(m).catch((e) => status(e.message, { error: true })));
     list.append(li);
   }
@@ -507,7 +639,7 @@ for (const chip of document.querySelectorAll('.chip[data-sort]')) {
 let openPl = null; // playlist shown in the detail view
 let plBusy = false;
 
-function plItem({ cover, title, meta, state, stateOk, onClick, onDelete, missing, preview }) {
+function plItem({ cover, title, meta, state, stateOk, onClick, onDelete, missing, preview, job }) {
   const li = document.createElement('li');
   if (missing) li.className = 'missing';
   if (preview) li.append(coverButton(preview, cover));
@@ -527,7 +659,8 @@ function plItem({ cover, title, meta, state, stateOk, onClick, onDelete, missing
   m.textContent = meta;
   div.append(t, m);
   li.append(div);
-  if (state) {
+  if (job) li.append(jobState(job));
+  else if (state) {
     const s = document.createElement('span');
     s.className = `r-state${stateOk ? ' ok' : ''}`;
     s.textContent = state;
@@ -586,7 +719,12 @@ function renderPlaylistDetail() {
   $('pl-cover').src = pl.cover || '';
   $('pl-title').textContent = pl.title;
   $('pl-meta').textContent = `${pl.author ? `${pl.author} · ` : ''}${pl.songs.length} 首 · 已下載 ${got}`;
-  $('pl-all').disabled = plBusy || got >= pl.songs.length;
+  const running = plBusy === pl.id;
+  $('pl-all').hidden = running;
+  $('pl-all').disabled = got >= pl.songs.length;
+  $('pl-pause').hidden = !running;
+  $('pl-cancel').hidden = !running;
+  paintPlaylistButtons();
   const ul = $('pl-songs');
   ul.innerHTML = '';
   pl.songs.forEach((s, i) => {
@@ -599,6 +737,7 @@ function renderPlaylistDetail() {
       meta: doc ? `${md.songAuthorName || ''} · ${md.levelAuthorName || s.mapper || ''}` : doc === null ? 'BeatSaver 上找不到這首歌' : '讀取中…',
       state: doc === null ? '' : have ? '✓ 已下載' : '下載',
       stateOk: have,
+      job: doc ? playlists.jobId(s) : null,
       missing: doc === null,
       preview: doc || null,
       onClick: doc === null ? null : () => playlistSong(s),
@@ -616,30 +755,48 @@ function showPlaylist(pl) {
 }
 
 async function playlistSong(s) {
-  if (plBusy) return;
-  plBusy = true;
   const name = s.name || s.hash;
+  const key = playlists.jobId(s);
+  lastRequested = key;
   try {
-    if (!playlists.isDownloaded(s)) status(`下載中：${name}…`, { sticky: true });
-    const entry = await playlists.getSong(s, (p) => status(`下載中：${name} ${Math.round(p * 100)}%`, { sticky: true }));
-    await selectEntry(entry, undefined, undefined, { open: true });
-    status(`已載入：${entry.info.title}`);
+    if (!playlists.isDownloaded(s)) status(`開始下載：${name}`);
+    const entry = await playlists.getSong(s);
+    if (lastRequested !== key) status(`已下載：${entry.info.title}`);
+    else {
+      await selectEntry(entry, undefined, undefined, { open: true });
+      status(`已載入：${entry.info.title}`);
+    }
   } catch (e) {
-    status(e.message, { error: true });
+    if (e.name === 'AbortError') status(`已取消下載：${name}`);
+    else status(e.message, { error: true });
   }
-  plBusy = false;
   renderPlaylists();
 }
 
+function paintPlaylistButtons() {
+  if (!openPl || !plBusy) return;
+  const jobs = downloads.list().filter((j) => j.group === openPl.id && ['queued', 'downloading', 'paused'].includes(j.state));
+  const allPaused = jobs.length > 0 && jobs.every((j) => j.state === 'paused');
+  $('pl-pause').textContent = allPaused ? '繼續' : '暫停全部';
+}
+$('pl-pause').addEventListener('click', () => {
+  if (!openPl) return;
+  const jobs = downloads.list().filter((j) => j.group === openPl.id && ['queued', 'downloading', 'paused'].includes(j.state));
+  if (jobs.length && jobs.every((j) => j.state === 'paused')) downloads.resumeAll(openPl.id);
+  else downloads.pauseAll(openPl.id);
+});
+$('pl-cancel').addEventListener('click', () => {
+  if (openPl) downloads.cancelAll(openPl.id);
+});
+
 $('pl-all').addEventListener('click', async () => {
   if (!openPl || plBusy) return;
-  plBusy = true;
+  plBusy = openPl.id; // id of the playlist whose 全部下載 is running
   renderPlaylists();
   try {
-    const r = await playlists.downloadAll(openPl, (done, total, s) => {
-      if (s) status(`全部下載：${done + 1} / ${total} · ${s.name || s.hash}`, { sticky: true });
-    });
-    status(r.total ? `已下載 ${r.downloaded} 首${r.failed ? `，${r.failed} 首失敗` : ''}` : '全部都已下載', { error: !!r.failed });
+    const r = await playlists.downloadAll(openPl);
+    if (r.cancelled) status(`已取消下載（已下載 ${r.downloaded} 首）`);
+    else status(r.total ? `已下載 ${r.downloaded} 首${r.failed ? `，${r.failed} 首失敗` : ''}` : '全部都已下載', { error: !!r.failed });
   } catch (e) {
     status(`下載失敗：${e.message}`, { error: true });
   }
