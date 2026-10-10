@@ -38,6 +38,7 @@ export class Saber {
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
+        forceSinglePass: true, // additive, no depth write: one pass gives the same picture
       }),
     );
     this.trail.frustumCulled = false;
@@ -50,6 +51,7 @@ export class Saber {
     this.prevTip = new THREE.Vector3();
     this.dir = new THREE.Vector3(0, 0, -1);
     this.history = []; // { t, base, tip, dir }
+    this.spare = []; // recycled history entries (no per-frame allocations)
     this.hasPose = false;
   }
 
@@ -102,8 +104,13 @@ export class Saber {
       this.prevTip.copy(this.tip);
       this.hasPose = true;
     }
-    this.history.push({ t: now, base: this.base.clone(), tip: this.tip.clone(), dir: this.dir.clone() });
-    while (this.history.length > 2 && now - this.history[0].t > HISTORY_SEC) this.history.shift();
+    const e = this.spare.pop() || { t: 0, base: new THREE.Vector3(), tip: new THREE.Vector3(), dir: new THREE.Vector3() };
+    e.t = now;
+    e.base.copy(this.base);
+    e.tip.copy(this.tip);
+    e.dir.copy(this.dir);
+    this.history.push(e);
+    while (this.history.length > 2 && now - this.history[0].t > HISTORY_SEC) this.spare.push(this.history.shift());
     this.updateTrail();
   }
 

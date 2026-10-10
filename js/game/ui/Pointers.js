@@ -3,6 +3,9 @@ import * as THREE from 'three';
 const _origin = new THREE.Vector3();
 const _dir = new THREE.Vector3();
 const _ray = new THREE.Raycaster();
+const _quat = new THREE.Quaternion();
+const _meshes = [];
+const _hits = [];
 
 /**
  * Laser pointers for UI panels: one per XR controller (target-ray space),
@@ -48,11 +51,15 @@ export class Pointers {
   }
 
   pick(panels) {
-    const meshes = panels.filter((p) => p.mesh.visible).map((p) => p.mesh);
-    if (!meshes.length) return null;
-    const hit = _ray.intersectObjects(meshes, false)[0];
+    _meshes.length = 0;
+    for (const p of panels) if (p.mesh.visible) _meshes.push(p.mesh);
+    if (!_meshes.length) return null;
+    _hits.length = 0;
+    const hit = _ray.intersectObjects(_meshes, false, _hits)[0];
+    _hits.length = 0;
     if (!hit || !hit.uv) return null;
-    return { panel: hit.object.userData.panel, uv: hit.uv.clone(), point: hit.point.clone(), distance: hit.distance };
+    // the raycaster creates fresh point / uv vectors for every intersection: no need to copy them
+    return { panel: hit.object.userData.panel, uv: hit.uv, point: hit.point, distance: hit.distance };
   }
 
   /** XR controllers; call each frame while menus are shown. */
@@ -79,7 +86,7 @@ export class Pointers {
         laser.scale.set(1, 1, hit.distance);
         cursor.visible = true;
         cursor.position.copy(hit.point);
-        cursor.quaternion.copy(hit.panel.mesh.getWorldQuaternion(new THREE.Quaternion()));
+        cursor.quaternion.copy(hit.panel.mesh.getWorldQuaternion(_quat));
         cursor.translateZ(0.005);
         for (const p of panels) if (p !== hit.panel) p.setHover(i, null);
         hit.panel.setHover(i, hit.panel.hitAt(hit.uv)?.id ?? null);

@@ -775,14 +775,20 @@ export class Menu {
     p.text('設定', CX, 75, { size: 44, weight: 800 });
     const L = CX;
     const R = CX + 510;
-    this.toggleRow(p, 'set-nofail', L, 110, '不會失敗', 'noFail');
-    this.toggleRow(p, 'set-auto', L, 200, '自動遊玩', 'autoplay');
-    this.toggleRow(p, 'set-mapcolors', L, 290, '譜面自訂顏色', 'useMapColors');
-    p.text('電腦螢幕觀戰', L, 424, { size: 30 });
+    const toggles = [
+      ['set-nofail', '不會失敗', 'noFail'],
+      ['set-auto', '自動遊玩', 'autoplay'],
+      ['set-mapcolors', '譜面自訂顏色', 'useMapColors'],
+      ['set-walls', '顯示牆壁', 'showWalls'],
+      ['set-bombs', '顯示炸彈', 'showBombs'],
+      ['set-debris', '顯示切開的方塊', 'showDebris'],
+    ];
+    toggles.forEach(([id, label, key], i) => this.toggleRow(p, id, L, 105 + i * 72, label, key));
+    p.text('電腦螢幕觀戰', L, 575, { size: 30 });
     [['third', '第三人稱'], ['first', '第一人稱'], ['off', '關閉']].forEach(([m, label], i) => {
-      p.button(`set-spec-${m}`, L + i * 152, 450, 142, 60, label, { size: 24, active: settings.get('spectator') === m, onClick: () => settings.set({ spectator: m }) });
+      p.button(`set-spec-${m}`, L + i * 152, 595, 142, 60, label, { size: 24, active: settings.get('spectator') === m, onClick: () => settings.set({ spectator: m }) });
     });
-    p.text('光劍顏色可在網頁設定中更改', L, 570, { size: 22, color: THEME.muted });
+    p.text('光劍顏色可在網頁設定中更改', L, 700, { size: 22, color: THEME.muted });
 
     const pct = (v) => `${Math.round(v * 100)}%`;
     this.stepperRow(p, 'set-vol', R, 110, '音樂音量', 'volume', pct);

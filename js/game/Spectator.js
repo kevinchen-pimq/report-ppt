@@ -27,6 +27,7 @@ export class Spectator {
     this.active = false;
     this.renderer = null;
     this.lastRender = 0;
+    this.prevVisible = [];
 
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'spectator';
@@ -216,10 +217,13 @@ export class Spectator {
       this.avatar.visible = true;
     }
 
-    const prev = hidden.map((o) => o.visible);
-    for (const o of hidden) o.visible = false;
+    const prev = this.prevVisible;
+    for (let i = 0; i < hidden.length; i++) {
+      prev[i] = hidden[i].visible;
+      hidden[i].visible = false;
+    }
     this.renderer.render(this.scene, cam);
-    hidden.forEach((o, i) => (o.visible = prev[i]));
+    for (let i = 0; i < hidden.length; i++) hidden[i].visible = prev[i];
     this.avatar.visible = false;
   }
 }

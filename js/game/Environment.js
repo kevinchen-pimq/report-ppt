@@ -1,9 +1,30 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLOR_LEFT, COLOR_RIGHT } from './constants.js';
 
 // Light groups driven by basic beatmap events:
 // 0 back lasers, 1 ring lights, 2 left lasers, 3 right lasers, 4 center lights
 const GROUPS = 5;
+
+const _m = new THREE.Matrix4();
+
+/** Bakes each mesh's transform into a copy of its geometry and merges them (static, same material). */
+function mergeStatic(meshes) {
+  const parts = meshes.map((m) => {
+    m.updateMatrix();
+    return m.geometry.clone().applyMatrix4(m.matrix);
+  });
+  const merged = mergeGeometries(parts, false);
+  for (const g of parts) g.dispose();
+  return merged;
+}
+
+/** Freezes an object's matrix (it never moves): skips recomposing it every frame. */
+function freeze(o) {
+  o.updateMatrix();
+  o.matrixAutoUpdate = false;
+  return o;
+}
 
 class LightGroup {
   constructor() {
@@ -70,10 +91,10 @@ export class Environment {
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
-    this.root.add(floor);
+    this.root.add(freeze(floor));
     const grid = new THREE.GridHelper(200, 100, 0x18183a, 0x101024);
     grid.position.y = -0.01;
-    this.root.add(grid);
+    this.root.add(freeze(grid));
   }
 
   buildTrack() {
@@ -83,13 +104,13 @@ export class Environment {
       new THREE.MeshStandardMaterial({ color: 0x15151f, roughness: 0.4, metalness: 0.6 }),
     );
     platform.position.set(0, -0.05, 0);
-    this.root.add(platform);
+    this.root.add(freeze(platform));
     const edge = new THREE.LineSegments(
       new THREE.EdgesGeometry(new THREE.BoxGeometry(2.6, 0.1, 2.6)),
       new THREE.LineBasicMaterial({ color: 0x5577ff }),
     );
     edge.position.copy(platform.position);
-    this.root.add(edge);
+    this.root.add(freeze(edge));
 
     // Runway with neon edges (center lights)
     const runway = new THREE.Mesh(
@@ -98,39 +119,61 @@ export class Environment {
     );
     runway.rotation.x = -Math.PI / 2;
     runway.position.set(0, 0.001, -70 - 1.3);
-    this.root.add(runway);
+    this.root.add(freeze(runway));
+    // runway edge strips: static, so merged into one mesh (one draw call)
     const stripGeo = new THREE.BoxGeometry(0.04, 0.02, 140);
-    for (const x of [-1.22, 1.22]) {
-      const s = new THREE.Mesh(stripGeo, this.mat(4));
+    const strips = [-1.22, 1.22].map((x) => {
+      const s = new THREE.Mesh(stripGeo);
       s.position.set(x, 0.01, -70 - 1.3);
-      this.root.add(s);
-    }
-    // lane separators (dim, static)
+      return s;
+    });
+    this.root.add(freeze(new THREE.Mesh(mergeStatic(strips), this.mat(4))));
+    stripGeo.dispose();
+    // lane separators (dim, static, merged)
     const laneMat = new THREE.MeshBasicMaterial({ color: 0x1a1a40 });
-    for (const x of [-0.6, 0, 0.6]) {
-      const s = new THREE.Mesh(new THREE.BoxGeometry(0.01, 0.005, 140), laneMat);
+    const laneGeo = new THREE.BoxGeometry(0.01, 0.005, 140);
+    const lanes = [-0.6, 0, 0.6].map((x) => {
+      const s = new THREE.Mesh(laneGeo);
       s.position.set(x, 0.005, -71.3);
-      this.root.add(s);
-    }
+      return s;
+    });
+    this.root.add(freeze(new THREE.Mesh(mergeStatic(lanes), laneMat)));
+    laneGeo.dispose();
   }
 
   buildLasers() {
-    // Left/right rotating lasers (groups 2 & 3)
+    // Left/right rotating lasers (groups 2 & 3): one instanced mesh per side.
+    // `pivot` objects only hold each beam's transform (they are not in the scene).
     this.lasers = [[], []];
+    this.laserMeshes = [];
     const geo = new THREE.CylinderGeometry(0.05, 0.05, 120, 6, 1, true);
     geo.translate(0, 60, 0);
     for (let side = 0; side < 2; side++) {
       const sign = side === 0 ? -1 : 1;
+      const mesh = new THREE.InstancedMesh(geo, this.mat(2 + side), 4);
+      mesh.frustumCulled = false; // beams sweep around; always roughly in view
       for (let i = 0; i < 4; i++) {
-        const pivot = new THREE.Group();
+        const pivot = new THREE.Object3D();
         pivot.position.set(sign * (12 + i * 3), 0, -30 - i * 12);
-        const beam = new THREE.Mesh(geo, this.mat(2 + side));
-        pivot.add(beam);
         pivot.userData.phase = i * 0.7;
         pivot.userData.sign = sign;
-        this.root.add(pivot);
         this.lasers[side].push(pivot);
       }
+      this.laserMeshes.push(mesh);
+      this.root.add(mesh);
+    }
+    this.syncLasers();
+  }
+
+  syncLasers() {
+    for (let side = 0; side < 2; side++) {
+      const mesh = this.laserMeshes[side];
+      const pivots = this.lasers[side];
+      for (let i = 0; i < pivots.length; i++) {
+        pivots[i].updateMatrix();
+        mesh.setMatrixAt(i, pivots[i].matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
     }
   }
 
@@ -156,35 +199,55 @@ export class Environment {
     const geo = new THREE.ShapeGeometry(shape);
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x111118, metalness: 0.8, roughness: 0.3, side: THREE.DoubleSide });
     const frameGeo = new THREE.ShapeGeometry(shape);
+    // 12 rings = 2 instanced meshes (frames + lights) instead of 24 meshes.
+    // `ring` objects only hold each ring's transform (they are not in the scene).
+    this.ringFrames = new THREE.InstancedMesh(frameGeo, frameMat, 12);
+    this.ringLights = new THREE.InstancedMesh(geo, this.mat(1), 12);
+    this.ringFrames.frustumCulled = false;
+    this.ringLights.frustumCulled = false;
+    // the frame sits slightly behind and larger than its light (ring-local transform)
+    this.frameLocal = new THREE.Matrix4().compose(new THREE.Vector3(0, 0, -0.05), new THREE.Quaternion(), new THREE.Vector3(1.04, 1.04, 1.04));
     for (let i = 0; i < 12; i++) {
-      const ring = new THREE.Group();
-      const light = new THREE.Mesh(geo, this.mat(1));
-      const frame = new THREE.Mesh(frameGeo, frameMat);
-      frame.scale.setScalar(1.04);
-      frame.position.z = -0.05;
-      ring.add(frame, light);
+      const ring = new THREE.Object3D();
       ring.position.set(0, 5, -25 - i * 6);
       ring.userData.index = i;
-      this.root.add(ring);
       this.rings.push(ring);
     }
+    this.root.add(this.ringFrames, this.ringLights);
+    this.syncRings();
+  }
+
+  syncRings() {
+    for (let i = 0; i < this.rings.length; i++) {
+      const r = this.rings[i];
+      r.updateMatrix();
+      this.ringLights.setMatrixAt(i, r.matrix);
+      this.ringFrames.setMatrixAt(i, _m.multiplyMatrices(r.matrix, this.frameLocal));
+    }
+    this.ringLights.instanceMatrix.needsUpdate = true;
+    this.ringFrames.instanceMatrix.needsUpdate = true;
   }
 
   buildBackLasers() {
-    // Back lasers (group 0): a fan of beams behind the rings
+    // Back lasers (group 0): a fan of beams behind the rings, plus a horizon glow bar.
+    // All static with the same material: merged into one mesh (one draw call).
     const geo = new THREE.CylinderGeometry(0.15, 0.15, 160, 6, 1, true);
     geo.translate(0, 80, 0);
+    const parts = [];
     for (let i = 0; i < 9; i++) {
-      const beam = new THREE.Mesh(geo, this.mat(0));
+      const beam = new THREE.Mesh(geo);
       beam.position.set(0, -2, -110);
       beam.rotation.z = (i - 4) * 0.22;
       beam.rotation.x = -0.25;
-      this.root.add(beam);
+      parts.push(beam);
     }
-    // a horizon glow bar (also back group)
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(80, 0.3, 0.3), this.mat(0));
+    const barGeo = new THREE.BoxGeometry(80, 0.3, 0.3);
+    const bar = new THREE.Mesh(barGeo);
     bar.position.set(0, 0.3, -105);
-    this.root.add(bar);
+    parts.push(bar);
+    this.root.add(freeze(new THREE.Mesh(mergeStatic(parts), this.mat(0))));
+    geo.dispose();
+    barGeo.dispose();
   }
 
   buildStars() {
@@ -200,7 +263,7 @@ export class Environment {
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.root.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8888aa, size: 0.6, fog: false })));
+    this.root.add(freeze(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8888aa, size: 0.6, fog: false }))));
   }
 
   setColors(left, right, leftBoost = left, rightBoost = right) {
@@ -300,6 +363,7 @@ export class Environment {
         p.rotation.x = -0.2 + Math.cos(p.userData.phase * 0.7) * 0.15;
       }
     }
+    this.syncLasers();
     // Rings
     this.ringSpinVel *= Math.exp(-dt * 1.2);
     this.ringSpin += this.ringSpinVel * dt;
@@ -309,5 +373,6 @@ export class Environment {
       r.rotation.z = this.ringSpin * (1 + i * 0.15);
       r.position.z = -25 - i * 6 * this.ringZoom;
     }
+    this.syncRings();
   }
 }

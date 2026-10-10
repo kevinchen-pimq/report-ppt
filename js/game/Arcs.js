@@ -33,9 +33,14 @@ export class ArcManager {
 
   acquire(arc) {
     const n = arc.samples.length;
-    let obj = this.pool.find((o) => o.n === n);
-    if (obj) this.pool.splice(this.pool.indexOf(obj), 1);
-    else obj = this.create(n);
+    let obj = null;
+    for (let i = 0; i < this.pool.length; i++) {
+      if (this.pool[i].n !== n) continue;
+      obj = this.pool[i];
+      this.pool.splice(i, 1);
+      break;
+    }
+    if (!obj) obj = this.create(n);
     obj.arc = arc;
     obj.mesh.visible = true;
     this.root.add(obj.mesh);
@@ -57,10 +62,11 @@ export class ArcManager {
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setIndex(index);
-    const mesh = new THREE.Mesh(
-      geo,
-      new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }),
-    );
+    const mat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+    // Additive + no depth write: face order doesn't matter, so skip three.js's two-pass
+    // (back faces, then front faces) rendering of transparent double-sided materials
+    mat.forceSinglePass = true;
+    const mesh = new THREE.Mesh(geo, mat);
     mesh.frustumCulled = false;
     return { mesh, n };
   }
