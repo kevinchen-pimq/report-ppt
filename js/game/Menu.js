@@ -3,6 +3,7 @@ import { UIPanel, THEME, roundRect } from './ui/UIPanel.js';
 import { settings, RANGES } from '../settings.js';
 import { searchMaps, searchPlaylists, latestVersion } from '../beatsaver.js';
 import { diffName, defaultSetIndex, mapStats } from '../library.js';
+import { downloads } from '../downloads.js';
 import { DIFF_NAMES } from '../mapLoader.js';
 import { SABER_STYLES, NOTE_STYLES, WALL_STYLES, buildSaberVisual } from './Models.js';
 
@@ -14,6 +15,8 @@ const SORTS = [
 ];
 const KEY_ROWS = ['1234567890', 'QWERTYUIOP', 'ASDFGHJKL', 'ZXCVBNM'];
 const ROWS = 5;
+const ACTIVE_JOB = new Set(['queued', 'downloading', 'paused']);
+const JOB_W = 380; // row space taken by the download controls
 
 const CX = 290; // content area left
 const CW = 985; // content area width
@@ -48,6 +51,8 @@ export class Menu {
     this.plv = { mode: 'list', pl: null, scroll: 0, listScroll: 0 };
     this.covers = new Map();
     this.headReadout = 0;
+    this.navSeq = 0; // bumped on every page change (a finished download only opens its song if this didn't change)
+    this.plRunning = new Map(); // playlist id -> { done, total } while 全部下載 runs
 
     // Calibration beat indicator (a 3D ring so it can flash every frame cheaply)
     this.pulse = new THREE.Mesh(
@@ -66,6 +71,7 @@ export class Menu {
     settings.subscribe(() => this.panel.invalidate());
     this.library.subscribe(() => this.panel.invalidate());
     game.playlists?.subscribe(() => this.panel.invalidate());
+    downloads.subscribe(() => this.panel.invalidate());
   }
 
   /** Rebuilds the appearance preview with the current styles. */
@@ -118,6 +124,7 @@ export class Menu {
   }
 
   open(page) {
+    if (page && page !== this.page) this.navSeq++;
     if (page) this.page = page;
     if (this.page !== 'song') this.game.stopPreview?.();
     if (this.page !== 'calibrate') this.stopCalibration();
@@ -256,6 +263,60 @@ export class Menu {
     if (this.game.mode === 'vr') {
       p.button('nav-exit', 24, 96 + 6 * 82 + 24, 240, 62, '離開 VR', { size: 26, color: THEME.red, onClick: () => this.game.exitVR() });
     }
+    this.renderDownloadsBadge(p, 24, 694, 240, 66);
+  }
+
+  /** Sidebar box: how many downloads are going and their overall progress. */
+  renderDownloadsBadge(p, x, y, w, h) {
+    const jobs = downloads.list().filter((j) => ACTIVE_JOB.has(j.state));
+    if (!jobs.length) return;
+    const { ctx } = p;
+    ctx.fillStyle = 'rgba(124,156,255,0.12)';
+    roundRect(ctx, x, y, w, h, 12);
+    ctx.fill();
+    const queued = jobs.filter((j) => j.state === 'queued').length;
+    const paused = jobs.filter((j) => j.state === 'paused').length;
+    const extra = `${queued ? ` · 排隊 ${queued}` : ''}${paused ? ` · 暫停 ${paused}` : ''}`;
+    p.text(`↓ 下載 ${jobs.length} 首${extra}`, x + 14, y + 30, { size: 21, weight: 700, color: paused === jobs.length ? THEME.muted : THEME.accent, maxWidth: w - 28 });
+    const sized = jobs.filter((j) => j.total);
+    const got = sized.reduce((n, j) => n + Math.min(j.received, j.total), 0);
+    const all = sized.reduce((n, j) => n + j.total, 0);
+    p.bar(x + 14, y + 44, w - 28, 8, all ? got / all : 0, paused === jobs.length ? THEME.muted : THEME.accent);
+  }
+
+  /** The download job with this id while it is queued / downloading / paused, else null. */
+  activeJob(id) {
+    const j = id ? downloads.get(id) : null;
+    return j && ACTIVE_JOB.has(j.state) ? j : null;
+  }
+
+  /**
+   * On a song row that is downloading: a thin progress bar along the bottom
+   * (from barX), the percent, and 暫停 / 繼續 and 取消 buttons at the right.
+   * Takes about JOB_W pixels at the right of the row.
+   */
+  jobControls(p, job, x, y, w, h, barX) {
+    const paused = job.state === 'paused';
+    const f = job.total ? Math.min(1, job.received / job.total) : 0;
+    const pct = `${Math.round(f * 100)}%`;
+    let label;
+    if (job.state === 'queued') label = '排隊中';
+    else if (paused) label = job.received ? `已暫停 ${pct}` : '已暫停';
+    else if (job.total && job.received >= job.total) label = '儲存中…';
+    else label = job.total ? pct : job.received ? fmtMB(job.received) : '連線中…';
+    const bw = 104;
+    const bh = 46;
+    const by = y + Math.round((h - bh) / 2) - 5;
+    const cancelX = x + w - 12 - bw;
+    const pauseX = cancelX - 10 - bw;
+    p.text(label, pauseX - 14, by + bh / 2 + 9, { size: 24, weight: 700, color: paused || job.state === 'queued' ? THEME.muted : THEME.accent, align: 'right' });
+    p.button(`dl-pause-${job.id}`, pauseX, by, bw, bh, paused ? '繼續' : '暫停', {
+      size: 22,
+      active: paused,
+      onClick: () => (paused ? downloads.resume(job.id) : downloads.pause(job.id)),
+    });
+    p.button(`dl-cancel-${job.id}`, cancelX, by, bw, bh, '取消', { size: 22, color: THEME.red, onClick: () => downloads.cancel(job.id) });
+    if (job.state !== 'queued') p.bar(barX, y + h - 9, x + w - 12 - barX, 5, f, paused ? THEME.muted : THEME.accent);
   }
 
   rowBg(p, id, x, y, w, h, onClick) {
@@ -300,6 +361,7 @@ export class Menu {
       const y = 105 + i * 124;
       this.rowBg(p, `lib-${e.key}`, CX, y, rowW, 112, () => this.openSong(e));
       p.image(e.coverImage, CX + 8, y + 8, 96, 96);
+      this.previewOnCover(p, e, CX + 8, y + 8, 96);
       p.text(e.info.title, CX + 124, y + 48, { size: 34, weight: 700, maxWidth: rowW - 330 });
       p.text(`${e.info.artist} · 譜師 ${e.info.mapper || '-'}`, CX + 124, y + 88, { size: 24, color: THEME.muted, maxWidth: rowW - 330 });
       p.text(e.cached ? fmtMB(e.size || 0) : '儲存中…', CX + rowW - 190, y + 64, { size: 22, color: THEME.muted, align: 'right' });
@@ -407,12 +469,14 @@ export class Menu {
         p.image(this.cover(v?.coverURL), CX + 8, y + 8, 72, 72, 10);
         this.previewOnCover(p, doc, CX + 8, y + 8, 72);
         const have = this.library.isDownloaded(doc);
-        p.text(doc.name, CX + 96, y + 38, { size: 30, weight: 700, maxWidth: rowW - (have ? 250 : 120) });
-        if (have) p.text('✓ 已下載', CX + rowW - 20, y + 38, { size: 24, color: THEME.green, align: 'right' });
+        const job = this.activeJob(this.library.beatSaverKey(doc));
+        p.text(doc.name, CX + 96, y + 38, { size: 30, weight: 700, maxWidth: rowW - (job ? 96 + JOB_W : have ? 250 : 120) });
+        if (job) this.jobControls(p, job, CX, y, rowW, 88, CX + 96);
+        else if (have) p.text('✓ 已下載', CX + rowW - 20, y + 38, { size: 24, color: THEME.green, align: 'right' });
         const diffs = [...new Set((v?.diffs || []).map((d) => DIFF_NAMES[d.difficulty] || d.difficulty))].join(' / ');
         const md = doc.metadata || {};
         const rating = doc.stats?.score ? ` · ${Math.round(doc.stats.score * 100)}%` : '';
-        p.text(`${md.songAuthorName || ''} · ${md.levelAuthorName || ''} · ${fmtDuration(md.duration)}${rating} · ${diffs}`, CX + 96, y + 72, { size: 22, color: THEME.muted, maxWidth: rowW - 120 });
+        p.text(`${md.songAuthorName || ''} · ${md.levelAuthorName || ''} · ${fmtDuration(md.duration)}${rating} · ${diffs}`, CX + 96, y + 72, { size: 22, color: THEME.muted, maxWidth: rowW - (job ? 96 + JOB_W : 120) });
       }
     }
     this.scrollButtons(p, 'bs', CX + rowW + 20, top, ROWS * 96 - 8, b.scroll, max, (val) => (b.scroll = val));
@@ -455,26 +519,34 @@ export class Menu {
     });
   }
 
-  async downloadMap(doc) {
-    if (this.downloading) return;
-    this.downloading = true;
-    let last = 0;
+  /** Row click on a BeatSaver song: download it (queued; several can run) and open it. */
+  downloadMap(doc) {
+    const saved = this.library.isDownloaded(doc);
+    return this.fetchAndOpen(doc.name, saved, () => this.library.addBeatSaver(doc));
+  }
+
+  /**
+   * Waits for a song download (or the load of a saved copy) and opens the song —
+   * but only if this was the last song clicked and the player is still on the same
+   * page; otherwise it just says so in the status line.
+   */
+  async fetchAndOpen(name, saved, task) {
+    const ticket = (this.openTicket = { nav: this.navSeq });
+    if (saved) this.setStatus(`讀取中：${name}…`, true);
     try {
-      this.setStatus(`下載中：${doc.name}…`, true);
-      const entry = await this.library.addBeatSaver(doc, (f) => {
-        const now = performance.now();
-        if (now - last > 200) {
-          last = now;
-          this.setStatus(`下載中：${doc.name} ${Math.round(f * 100)}%`, true);
-        }
-      });
-      this.setStatus('');
-      this.openSong(entry);
+      const entry = await task();
+      if (saved) this.setStatus('');
+      if (this.openTicket === ticket && this.navSeq === ticket.nav && this.visible && this.game.state === 'menu') {
+        this.openTicket = null;
+        this.openSong(entry);
+      } else if (!saved) this.setStatus(`已下載：${name}`);
     } catch (e) {
-      console.error(e);
-      this.setStatus(`下載失敗：${e.message}`);
+      if (e.name === 'AbortError') this.setStatus(`已取消下載：${name}`);
+      else {
+        console.error(e);
+        this.setStatus(`${saved ? '讀取' : '下載'}失敗：${e.message}`);
+      }
     }
-    this.downloading = false;
   }
 
   // ----- playlists ------------------------------------------------------------------
@@ -494,56 +566,68 @@ export class Menu {
     v.mode = 'detail';
     v.pl = pl;
     v.scroll = 0;
+    this.navSeq++;
     this.open('playlists');
     this.game.playlists.resolve(pl).catch((e) => this.setStatus(`讀取歌單失敗：${e.message}`));
   }
 
-  async playlistSong(song) {
-    if (this.downloading) return;
-    this.downloading = true;
-    let last = 0;
-    try {
-      const have = this.game.playlists.isDownloaded(song);
-      this.setStatus(have ? `讀取中：${song.name}…` : `下載中：${song.name}…`, true);
-      const entry = await this.game.playlists.getSong(song, (f) => {
-        const now = performance.now();
-        if (now - last > 200) {
-          last = now;
-          this.setStatus(`下載中：${song.name} ${Math.round(f * 100)}%`, true);
-        }
-      });
-      this.setStatus('');
-      this.openSong(entry);
-    } catch (e) {
-      this.setStatus(e.message);
-    }
-    this.downloading = false;
+  playlistSong(song) {
+    const store = this.game.playlists;
+    return this.fetchAndOpen(song.name || song.hash, store.isDownloaded(song), () => store.getSong(song));
   }
 
+  /** 全部下載: queues every missing song of the playlist (group = playlist id). */
   async downloadPlaylist(pl) {
-    if (this.downloading) return;
-    this.downloading = true;
+    if (this.plRunning.has(pl.id)) return;
+    this.plRunning.set(pl.id, { done: 0, total: 0 });
+    this.panel.invalidate();
     try {
-      const r = await this.game.playlists.downloadAll(pl, (done, total, s) => {
-        this.setStatus(s ? `下載全部：${done + 1} / ${total} · ${s.name}` : '', true);
+      const r = await this.game.playlists.downloadAll(pl, (done, total) => {
+        this.plRunning.set(pl.id, { done, total });
+        this.panel.invalidate();
       });
-      this.setStatus(r.total ? `已下載 ${r.downloaded} 首${r.failed ? `，${r.failed} 首失敗` : ''}` : '全部都已下載');
+      const failed = r.failed ? `，${r.failed} 首失敗` : '';
+      if (!r.total) this.setStatus('全部都已下載');
+      else if (r.cancelled) this.setStatus(`已取消下載（已下載 ${r.downloaded} 首${failed}）`);
+      else this.setStatus(`已下載 ${r.downloaded} 首${failed}`);
     } catch (e) {
       this.setStatus(`下載失敗：${e.message}`);
     }
-    this.downloading = false;
+    this.plRunning.delete(pl.id);
+    this.panel.invalidate();
   }
 
-  /** ▶ / ❚❚ over a BeatSaver song's cover: BeatSaver's preview clip, before downloading. */
-  previewOnCover(p, doc, x, y, size) {
+  /**
+   * ▶ / ❚❚ over a song's cover: click the cover to preview. target is a BeatSaver
+   * map doc (its short preview clip, before downloading) or a library entry.
+   */
+  previewOnCover(p, target, x, y, size, { id, radius = 10 } = {}) {
     const pv = this.game.previewState;
-    const mine = pv.key === `bsdoc:${doc.id}`;
-    p.button(`pv-${doc.id}`, x, y, size, size, mine && pv.loading ? '…' : mine && pv.playing ? '❚❚' : '▶', {
-      size: mine && pv.playing ? 22 : 30,
-      radius: 10,
-      active: mine && pv.playing,
-      onClick: () => this.game.togglePreview(doc),
-    });
+    const isDoc = !!target.versions;
+    const key = isDoc ? `bsdoc:${target.id}` : target.key;
+    const mine = pv.key === key;
+    const playing = mine && pv.playing;
+    const wid = id || (isDoc ? `pv-${target.id}` : `pv-${target.key}`);
+    const hover = p.isHovered(wid);
+    const k = Math.min(size, 160) / 72;
+    const { ctx } = p;
+    // light tint + outline when hovered / playing; the cover stays visible
+    if (hover || playing) {
+      ctx.fillStyle = playing ? 'rgba(124,156,255,0.32)' : 'rgba(124,156,255,0.22)';
+      roundRect(ctx, x, y, size, size, radius);
+      ctx.fill();
+      ctx.strokeStyle = hover ? '#ffffff' : THEME.accent;
+      ctx.lineWidth = hover ? 4 : 3;
+      ctx.stroke();
+    }
+    // dark disc behind the symbol so it reads on bright covers
+    ctx.fillStyle = playing ? 'rgba(40,60,140,0.75)' : 'rgba(0,0,0,0.45)';
+    ctx.beginPath();
+    ctx.arc(x + size / 2, y + size / 2, 23 * k, 0, Math.PI * 2);
+    ctx.fill();
+    const glyph = mine && pv.loading ? '…' : playing ? '❚❚' : '▶';
+    p.text(glyph, x + size / 2 + (glyph === '▶' ? 2 * k : 0), y + size / 2 + 1, { size: Math.round((playing ? 20 : 26) * k), weight: 700, align: 'center', baseline: 'middle' });
+    p.area(wid, x, y, size, size, { onClick: () => this.game.togglePreview(target) });
   }
 
   plCover(pl) {
@@ -613,11 +697,34 @@ export class Menu {
     const store = this.game.playlists;
     const v = this.plv;
     p.image(this.plCover(pl), CX, 30, 90, 90, 12);
-    p.text(pl.title, CX + 110, 72, { size: 38, weight: 800, maxWidth: CW - 520 });
+    const run = this.plRunning.get(pl.id);
+    const headW = run ? CW - 700 : CW - 520;
+    p.text(pl.title, CX + 110, 72, { size: 38, weight: 800, maxWidth: headW });
     const got = pl.songs.filter((s) => store.isDownloaded(s)).length;
-    p.text(`${pl.author ? `${pl.author} · ` : ''}${pl.songs.length} 首 · 已下載 ${got}`, CX + 110, 110, { size: 24, color: THEME.muted, maxWidth: CW - 520 });
-    p.button('pl-all', CX + CW - 400, 40, 230, 70, '全部下載', { size: 26, active: got < pl.songs.length, disabled: got >= pl.songs.length || this.downloading, onClick: () => this.downloadPlaylist(pl) });
-    p.button('pl-back', CX + CW - 160, 40, 160, 70, '返回', { size: 26, onClick: () => { v.mode = 'list'; this.panel.invalidate(); } });
+    if (run) {
+      // 全部下載 is running: pause / resume and cancel the playlist's downloads
+      p.text(run.total ? `全部下載中：${run.done} / ${run.total}` : '準備下載…', CX + 110, 110, { size: 24, color: THEME.accent, maxWidth: headW });
+      const jobs = downloads.list().filter((j) => j.group === pl.id && ACTIVE_JOB.has(j.state));
+      const paused = jobs.length > 0 && jobs.every((j) => j.state === 'paused');
+      p.button('pl-pause', CX + CW - 560, 40, 185, 70, paused ? '繼續' : '暫停全部', {
+        size: 26,
+        active: paused,
+        disabled: !jobs.length,
+        onClick: () => (paused ? downloads.resumeAll(pl.id) : downloads.pauseAll(pl.id)),
+      });
+      p.button('pl-cancel', CX + CW - 365, 40, 185, 70, '取消下載', { size: 26, color: THEME.red, onClick: () => downloads.cancelAll(pl.id) });
+    } else {
+      p.text(`${pl.author ? `${pl.author} · ` : ''}${pl.songs.length} 首 · 已下載 ${got}`, CX + 110, 110, { size: 24, color: THEME.muted, maxWidth: headW });
+      p.button('pl-all', CX + CW - 400, 40, 230, 70, '全部下載', { size: 26, active: got < pl.songs.length, disabled: got >= pl.songs.length, onClick: () => this.downloadPlaylist(pl) });
+    }
+    p.button('pl-back', CX + CW - 160, 40, 160, 70, '返回', {
+      size: 26,
+      onClick: () => {
+        v.mode = 'list';
+        this.navSeq++;
+        this.panel.invalidate();
+      },
+    });
     const top = 140;
     const rowW = CW - 100;
     const max = Math.max(0, pl.songs.length - 6);
@@ -633,10 +740,15 @@ export class Menu {
       const cover = doc ? latestVersion(doc)?.coverURL : null;
       p.image(this.cover(cover), CX + 8, y + 8, 68, 68, 8);
       if (doc) this.previewOnCover(p, doc, CX + 8, y + 8, 68);
-      p.text(`${v.scroll + i + 1}. ${doc?.name || s.name || s.hash}`, CX + 90, y + 36, { size: 28, weight: 700, color: missing ? THEME.muted : THEME.text, maxWidth: rowW - 260 });
-      p.text(doc ? `${doc.metadata?.songAuthorName || ''} · ${doc.metadata?.levelAuthorName || s.mapper || ''}` : missing ? 'BeatSaver 上找不到這首歌' : '讀取中…', CX + 90, y + 70, { size: 22, color: THEME.muted, maxWidth: rowW - 260 });
-      const status = missing ? '' : store.isDownloaded(s) ? '✓ 已下載' : '下載';
-      p.text(status, CX + rowW - 20, y + 52, { size: 24, color: store.isDownloaded(s) ? THEME.green : THEME.accent, align: 'right' });
+      const job = this.activeJob(store.jobId(s));
+      const textW = job ? rowW - 90 - JOB_W : rowW - 260;
+      p.text(`${v.scroll + i + 1}. ${doc?.name || s.name || s.hash}`, CX + 90, y + 36, { size: 28, weight: 700, color: missing ? THEME.muted : THEME.text, maxWidth: textW });
+      p.text(doc ? `${doc.metadata?.songAuthorName || ''} · ${doc.metadata?.levelAuthorName || s.mapper || ''}` : missing ? 'BeatSaver 上找不到這首歌' : '讀取中…', CX + 90, y + 70, { size: 22, color: THEME.muted, maxWidth: textW });
+      if (job) this.jobControls(p, job, CX, y, rowW, 84, CX + 90);
+      else {
+        const status = missing ? '' : store.isDownloaded(s) ? '✓ 已下載' : '下載';
+        p.text(status, CX + rowW - 20, y + 52, { size: 24, color: store.isDownloaded(s) ? THEME.green : THEME.accent, align: 'right' });
+      }
     }
     // the song list scrolls by 6
     if (max > 0) {
@@ -686,14 +798,8 @@ export class Menu {
     if (!e) return this.renderLibrary(p);
     const info = e.info;
     p.image(e.coverImage, CX, 40, 220, 220, 16);
-    // preview play / pause over the cover
-    const pv = this.game.previewState;
-    const mine = pv.entry === e;
-    p.button('song-preview', CX + 10, 196, 200, 56, mine && pv.loading ? '載入中…' : mine && pv.playing ? '❚❚ 暫停' : '▶ 試聽', {
-      size: 26,
-      active: mine && pv.playing,
-      onClick: () => this.game.togglePreview(e),
-    });
+    // click the cover to preview (play / pause)
+    this.previewOnCover(p, e, CX, 40, 220, { id: 'song-preview', radius: 16 });
     const tx = CX + 250;
     p.text(info.title, tx, 95, { size: 46, weight: 800, maxWidth: CW - 260 });
     p.text(info.subTitle, tx, 140, { size: 28, color: THEME.muted, maxWidth: CW - 260 });
