@@ -20,6 +20,9 @@ export const DEFAULTS = {
   noteModel: 'classic', // classic | mech | neon | outline | custom
   wallStyle: 'translucent', // translucent | edges
   saberFlip: false, // reverse a custom saber model's direction
+  showWalls: true, // false = maps play without walls
+  showBombs: true, // false = maps play without bombs
+  showDebris: true, // false = cut blocks vanish instead of splitting into halves
 };
 
 // Ranges and steps used by both UIs
