@@ -155,9 +155,17 @@ export class Environment {
     runway.rotation.x = -Math.PI / 2;
     runway.position.set(0, 0.001, -70 - 1.3);
     this.root.add(freeze(runway));
-    // runway edge strips: static, so merged into one mesh (one draw call). Each strip is
-    // made of segments (Chroma lights them one by one) without the inner end caps, so it
-    // still looks like one long strip.
+    // runway edge strips: static, so merged into one mesh (one draw call)
+    const stripGeo = new THREE.BoxGeometry(0.04, 0.02, 140);
+    const plain = [-1.22, 1.22].map((x) => {
+      const s = new THREE.Mesh(stripGeo);
+      s.position.set(x, 0.01, -70 - 1.3);
+      return s;
+    });
+    this.runwayPlain = addWhiteColors(mergeStatic(plain));
+    stripGeo.dispose();
+    // Chroma lights the strips segment by segment: a second geometry with each strip made of
+    // segments (without the inner end caps, so it still looks like one long strip)
     const segLen = 140 / RUNWAY_SEGMENTS;
     const strips = [];
     for (let i = 0; i < LIGHTS[4]; i++) {
@@ -178,9 +186,9 @@ export class Environment {
       strips.push(s);
     }
     this.runwayRanges = vertexRanges(strips);
-    const runwayGeo = addWhiteColors(mergeStatic(strips));
+    this.runwaySegments = addWhiteColors(mergeStatic(strips));
     for (const s of strips) s.geometry.dispose();
-    this.runwayMesh = freeze(new THREE.Mesh(runwayGeo, this.mat(4, true)));
+    this.runwayMesh = freeze(new THREE.Mesh(this.runwayPlain, this.mat(4, true)));
     this.root.add(this.runwayMesh);
     // lane separators (dim, static, merged)
     const laneMat = new THREE.MeshBasicMaterial({ color: 0x1a1a40 });
@@ -463,7 +471,7 @@ export class Environment {
     const ringSink = new ColorSink(this.ringLights.instanceColor);
     const laserSinks = this.laserMeshes.map((m) => new ColorSink(m.instanceColor));
     const backSink = new ColorSink(this.backMesh.geometry.attributes.color);
-    const runwaySink = new ColorSink(this.runwayMesh.geometry.attributes.color);
+    const runwaySink = new ColorSink(this.runwaySegments.attributes.color);
     const backLights = this.backRanges.slice(0, LIGHTS[0]).map(([a, b]) => new RangeLight(backSink, a, b));
     // the horizon bar follows the brightest back beam
     backSink.follow = { lights: backLights, range: this.backRanges[LIGHTS[0]] };
@@ -500,12 +508,14 @@ export class Environment {
     if (!on) {
       // group lighting: every light follows its group's material colour
       white(this.backMesh.geometry.attributes.color);
-      white(this.runwayMesh.geometry.attributes.color);
+      white(this.runwaySegments.attributes.color);
+      this.runwayMesh.geometry = this.runwayPlain;
       white(this.ringLights.instanceColor);
       for (const m of this.laserMeshes) white(m.instanceColor);
       return;
     }
     // per-light colours carry everything; the materials stay white
+    this.runwayMesh.geometry = this.runwaySegments;
     for (const g of this.groups) for (const m of g.materials) m.color.setRGB(1, 1, 1);
   }
 
