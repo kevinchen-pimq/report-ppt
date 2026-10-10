@@ -28,6 +28,7 @@ const _box = new THREE.Box3();
 const _white = new THREE.Color(0xffffff);
 const _evalVel = new THREE.Vector3();
 const AXES = ['x', 'y', 'z'];
+const MAX_SLOTS = 64; // extra note colour slots (Chroma); beyond that colours are shared coarsely
 
 /** Bomb body + spikes merged into one geometry: one draw call per bomb instead of nine. */
 function makeBombGeometry() {
@@ -107,6 +108,12 @@ export class NoteManager {
     this.wallGeo = new THREE.BoxGeometry(1, 1, 1);
     this.wallMat = createEdgeGlowMaterial({ color: COLOR_WALL, ...wallStyleParams('translucent') });
 
+    // Chroma object colours (setting): extra note style slots / bomb / wall materials per colour
+    this.chroma = false;
+    this.slotByHex = new Map(); // 0xRRGGBB -> note style slot (2+)
+    this.bombMats = new Map(); // 0xRRGGBB -> bomb material
+    this.wallMats = new Map(); // 0xRRGGBB -> wall material (copy of wallMat with its own colour)
+
     // Gameplay options (settings: showWalls / showBombs)
     this.showWalls = true;
     this.showBombs = true;
@@ -115,6 +122,77 @@ export class NoteManager {
     this.active = [];
     this.activeWalls = [];
     this.reset(null);
+  }
+
+  /** Chroma object colours on / off (takes effect at the next reset). */
+  setChroma(on) {
+    this.chroma = !!on;
+  }
+
+  /** Note style slot for a Chroma colour (created once, shared by every note of that colour). */
+  slotFor(hex) {
+    let slot = this.slotByHex.get(hex);
+    if (slot !== undefined) return slot;
+    if (this.slotByHex.size >= MAX_SLOTS) {
+      // too many distinct colours: share the closest coarse colour
+      const coarse = (hex & 0xe0e0e0) | 0x101010;
+      slot = this.slotByHex.get(coarse);
+      if (slot !== undefined) return slot;
+      if (this.slotByHex.size >= MAX_SLOTS * 2) return -1;
+      hex = coarse;
+    }
+    slot = this.style.addSlot(hex);
+    this.slotByHex.set(hex, slot);
+    const c = this.style.colors[slot];
+    const arrow = this.colorArrowMats[0].clone();
+    arrow.color.copy(c).lerp(_white, 0.04);
+    const dot = this.colorDotMats[0].clone();
+    dot.color.copy(arrow.color);
+    this.colorArrowMats[slot] = arrow;
+    this.colorDotMats[slot] = dot;
+    return slot;
+  }
+
+  /** Style slot a note / link is drawn with: its saber colour, or its Chroma colour. */
+  slotOf(note) {
+    if (this.chroma && note.chroma != null && note.kind !== 'bomb') {
+      const s = this.slotFor(note.chroma);
+      if (s >= 0) return s;
+    }
+    return note.color === 1 ? 1 : 0;
+  }
+
+  bombMatFor(hex) {
+    let m = this.bombMats.get(hex);
+    if (!m) {
+      m = this.bombMat.clone();
+      m.color.setHex(hex).multiplyScalar(0.55);
+      m.emissive.setHex(hex).multiplyScalar(0.3);
+      this.bombMats.set(hex, m);
+    }
+    return m;
+  }
+
+  wallMatFor(hex) {
+    let m = this.wallMats.get(hex);
+    if (!m) {
+      m = this.wallMat.clone(); // shares the shader program; own uniforms
+      m.uniforms.color.value.setHex(hex);
+      this.wallMats.set(hex, m);
+    }
+    return m;
+  }
+
+  /** Drops the Chroma note slots (they belong to the note style). */
+  clearSlots() {
+    for (const k of Object.keys(this.pools)) if (k !== 'bomb' && k !== 'wall') delete this.pools[k];
+    for (let i = 2; i < this.colorArrowMats.length; i++) {
+      this.colorArrowMats[i].dispose();
+      this.colorDotMats[i].dispose();
+    }
+    this.colorArrowMats.length = 2;
+    this.colorDotMats.length = 2;
+    this.slotByHex.clear();
   }
 
   setColors(left, right, obstacle = COLOR_WALL) {
@@ -136,7 +214,7 @@ export class NoteManager {
     this.styleKey = key;
     for (const o of this.active) this.release(o);
     this.active = [];
-    for (const k of Object.keys(this.pools)) if (k !== 'bomb' && k !== 'wall') delete this.pools[k];
+    this.clearSlots();
     this.style.dispose();
     this.style = new NoteStyle(id, custom);
     this.style.setColors(this.colors[0], this.colors[1]);
@@ -148,6 +226,11 @@ export class NoteManager {
     u.fill.value = p.fill;
     u.edge.value = p.edge;
     u.intensity.value = p.intensity;
+    for (const m of this.wallMats.values()) {
+      m.uniforms.fill.value = p.fill;
+      m.uniforms.edge.value = p.edge;
+      m.uniforms.intensity.value = p.intensity;
+    }
   }
 
   /** Turns walls / bombs on or off; switching off removes the ones already on screen. */
@@ -167,8 +250,10 @@ export class NoteManager {
     }
   }
 
+  /** color: the style slot for notes / links; for bombs a Chroma colour (0xRRGGBB) or -1. */
   poolKey(kind, color) {
-    return kind === 'bomb' ? 'bomb' : `${kind}${color}`;
+    if (kind === 'bomb') return color >= 0 ? `bomb:${color}` : 'bomb';
+    return `${kind}${color}`;
   }
 
   reset(map) {
@@ -179,6 +264,10 @@ export class NoteManager {
     this.map = map;
     this.noteIdx = 0;
     this.wallIdx = 0;
+    if (map && this.chroma) {
+      // create every colour's materials now, not mid-song
+      for (const n of map.notes) if (n.chroma != null && n.kind !== 'bomb') this.slotFor(n.chroma);
+    }
     if (map) {
       this.baseNjs = map.njs;
       this.njs = map.njsAt(0);
@@ -191,10 +280,11 @@ export class NoteManager {
   // ----- object pools -------------------------------------------------------
   acquire(note) {
     const kind = note.kind;
-    const key = this.poolKey(kind, note.color);
+    const slot = kind === 'bomb' ? (this.chroma && note.chroma != null ? note.chroma : -1) : this.slotOf(note);
+    const key = this.poolKey(kind, slot);
     const pool = this.pools[key] || (this.pools[key] = []);
     let obj = pool.pop();
-    if (!obj) obj = this.createObject(kind, note.color);
+    if (!obj) obj = this.createObject(kind, slot);
     if (kind === 'note') {
       obj.arrow.visible = note.dir !== 8;
       obj.dot.visible = note.dir === 8;
@@ -215,11 +305,12 @@ export class NoteManager {
     return obj;
   }
 
+  /** color: style slot (notes / links) or Chroma bomb colour (-1 = default). */
   createObject(kind, color) {
     const group = new THREE.Group();
-    const obj = { kind, group, key: this.poolKey(kind, color) };
+    const obj = { kind, group, key: this.poolKey(kind, color), slot: color };
     if (kind === 'bomb') {
-      const body = new THREE.Mesh(this.bombGeo, this.bombMat);
+      const body = new THREE.Mesh(this.bombGeo, color >= 0 ? this.bombMatFor(color) : this.bombMat);
       group.add(body);
       obj.body = body;
     } else if (kind === 'link') {
@@ -250,9 +341,11 @@ export class NoteManager {
     let w = this.pools.wall.pop();
     if (!w) {
       const group = new THREE.Group();
-      group.add(new THREE.Mesh(this.wallGeo, this.wallMat));
-      w = { group };
+      const mesh = new THREE.Mesh(this.wallGeo, this.wallMat);
+      group.add(mesh);
+      w = { group, mesh };
     }
+    w.mesh.material = this.chroma && wall.chroma != null ? this.wallMatFor(wall.chroma) : this.wallMat;
     w.wall = wall;
     const width = Math.abs(wall.w) * LANE_W;
     const left = wall.w >= 0 ? (wall.x - 2) * LANE_W : (wall.x - 2 + wall.w) * LANE_W;
@@ -484,9 +577,10 @@ export class NoteManager {
     _n.normalize();
     const dist = autoplay ? 0 : Math.abs(_n.dot(_a.subVectors(p, saber.tip)));
 
-    const color = this.colors[note.color] || this.colors[1];
+    const slot = obj.slot >= 0 ? obj.slot : note.color === 1 ? 1 : 0;
+    const color = slot > 1 ? this.style.colors[slot] : this.colors[note.color] || this.colors[1];
     const noteVel = _b.set(0, 0, this.njs);
-    this.effects.spawnDebris(obj.body, this.style.debrisLayers(note.color === 1 ? 1 : 0, obj.kind === 'link'), _n, cutDirW, noteVel);
+    this.effects.spawnDebris(obj.body, this.style.debrisLayers(slot, obj.kind === 'link'), _n, cutDirW, noteVel);
     this.effects.spawnSparks(p, color, good ? 30 : 12, 3, cutDirW);
 
     if (good) this.cb.onCut(note, saber, { distance: dist, autoplay, cutDir: cutDirW.clone(), position: p.clone() });

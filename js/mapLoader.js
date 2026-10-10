@@ -125,6 +125,8 @@ export function parseInfo(files) {
         mappers: d.beatmapAuthors?.mappers || [],
         colorSchemeIdx: d.beatmapColorSchemeIdx ?? -1,
         customColors: customColorsV2(d.customData),
+        environment: (raw.environmentNames || [])[d.environmentNameIdx ?? 0] || null,
+        chroma: chromaMod(d.customData),
       });
     }
     const mappers = new Set();
@@ -169,6 +171,8 @@ export function parseInfo(files) {
           offset: d._noteJumpStartBeatOffset || 0,
           colorSchemeIdx: d._beatmapColorSchemeIdx ?? -1,
           customColors: customColorsV2(d._customData),
+          environment: (raw._environmentNames || [])[d._environmentNameIdx ?? -1] || raw._environmentName || null,
+          chroma: chromaMod(d._customData),
         })),
       })),
     };
@@ -250,6 +254,18 @@ function schemeV4(c) {
   };
 }
 
+// the white light colours alone don't count as "custom colours" (they need the Chroma setting)
+const hasColors = (o) => Object.entries(o).some(([k, v]) => v != null && !k.startsWith('envWhite'));
+
+/** 'required' | 'suggested' | null: whether a difficulty lists the Chroma mod (SongCore requirements / suggestions). */
+function chromaMod(cd) {
+  if (!cd) return null;
+  const has = (list) => Array.isArray(list) && list.some((m) => typeof m === 'string' && m.toLowerCase().startsWith('chroma'));
+  if (has(cd._requirements) || has(cd.requirements)) return 'required';
+  if (has(cd._suggestions) || has(cd.suggestions)) return 'suggested';
+  return null;
+}
+
 // Per-difficulty colours from customData (SongCore / Chroma convention)
 function customColorsV2(cd) {
   if (!cd) return null;
@@ -265,18 +281,21 @@ function customColorsV2(cd) {
     envLeftBoost: pick('_envColorLeftBoost', 'envColorLeftBoost'),
     envRightBoost: pick('_envColorRightBoost', 'envColorRightBoost'),
     obstacle: pick('_obstacleColor', 'obstacleColor'),
+    // white light colour: only used with the Chroma setting on
+    envWhite: pick('_envColorWhite', 'envColorWhite'),
+    envWhiteBoost: pick('_envColorWhiteBoost', 'envColorWhiteBoost'),
   };
-  return Object.values(out).some((v) => v != null) ? out : null;
+  return hasColors(out) ? out : null;
 }
 
 /** Map-defined colours for a difficulty: { left, right, envLeft, envRight, envLeftBoost, envRightBoost, obstacle } (null = default). */
 export function resolveColors(info, diff) {
-  const out = { left: null, right: null, envLeft: null, envRight: null, envLeftBoost: null, envRightBoost: null, obstacle: null };
+  const out = { left: null, right: null, envLeft: null, envRight: null, envLeftBoost: null, envRightBoost: null, obstacle: null, envWhite: null, envWhiteBoost: null };
   const sc = info.colorSchemes?.[diff.colorSchemeIdx];
   if (sc) {
     if (sc.notes) Object.assign(out, { left: sc.left, right: sc.right, obstacle: sc.obstacle });
     if (sc.lights) Object.assign(out, { envLeft: sc.envLeft, envRight: sc.envRight, envLeftBoost: sc.envLeftBoost, envRightBoost: sc.envRightBoost });
   }
   if (diff.customColors) for (const [k, v] of Object.entries(diff.customColors)) if (v != null) out[k] = v;
-  return Object.values(out).some((v) => v != null) ? out : null;
+  return hasColors(out) ? out : null;
 }

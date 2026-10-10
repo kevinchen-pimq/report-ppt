@@ -97,7 +97,7 @@ $('now-cover').addEventListener('click', (ev) => {
 
 // ---------------------------------------------------------------------------
 // Settings (shared with the in-VR menu through the settings store)
-const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'saberFlip', 'showWalls', 'showBombs', 'showDebris', 'showFps'];
+const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'chroma', 'saberFlip', 'showWalls', 'showBombs', 'showDebris', 'showFps'];
 const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle'];
 const RANGES_UI = {
   playerHeight: (v) => `${Number(v).toFixed(2)} m`,
@@ -959,6 +959,7 @@ function previewDiff() {
     let text = `方塊 ${m.colorNotes} · 鏈 ${m.links} · 弧線 ${m.arcs.length} · 炸彈 ${st.bombs} · 牆 ${m.walls.length} · NJS ${m.njs} · NPS ${st.nps} · 譜面格式 v${m.version}`;
     if (m.njsEvents) text += ` · NJS 變速事件 ${m.njsEvents}`;
     if (p.meta.colors) text += ' · 有自訂顏色';
+    if (p.meta.chroma) text += settings.get('chroma') ? ' · Chroma' : ' · Chroma（已停用）';
     if (/360|90/.test(p.set.characteristic)) text += ' · ⚠ 旋轉模式的旋轉事件會被忽略';
     $('diff-stats').textContent = text;
   } catch (e) {

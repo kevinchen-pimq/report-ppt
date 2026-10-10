@@ -30,6 +30,7 @@
   - 方塊、圓點方塊、角度偏移、鏈（Chain）、**弧線（Arc）**、炸彈、牆壁、基本燈光事件、色彩加強（Boost）事件
   - **NJS 變速事件**（v4 `njsEvents`，含緩動曲線）：方塊速度隨譜面變化，反應時間不變
   - **譜面自訂顏色**：v2.1 / v4 `colorSchemes`、v2 難度 `_customData`（`_colorLeft`、`_envColorLeft`、`_obstacleColor`…），可在設定中關閉
+  - **Chroma**（v2 `_customData` / v3 `customData`，可在設定中關閉）：方塊、炸彈、牆壁、弧線與鏈的顏色；燈光事件的顏色、`lightID`（依原版場景的燈數按比例對應到本遊戲的燈）、`_lightGradient` 漸層、緩動（easing）與 HSV 漸變、v3 過渡事件；光環旋轉 / 縮放（`rotation`、`step`、`prop`、`speed`、`direction`…）、雷射速度（`speed`、`direction`、`lockRotation`）；Chroma 1 的 RGB 燈光事件。場景改造（`environment`）、Noodle Extensions、Vivify 不支援（會被忽略）
   - Standard、OneSaber、NoArrows、Lawless、Lightshow 等譜面特性（360/90 度的旋轉事件會被忽略）
 - **遊玩**
   - 左手紅劍、右手藍劍，依箭頭方向揮砍；判定顏色、方向、揮劍速度
@@ -73,7 +74,7 @@
 | 揮劍 | 揮動控制器 | 移動滑鼠（藍劍），按住左鍵改控制紅劍 |
 | 閃避牆壁 | 移動頭部 | A / D 左右、S 蹲下 |
 
-設定（網頁與 VR 選單共用並自動儲存）：不會失敗、自動遊玩、譜面自訂顏色、顯示牆壁 / 炸彈 / 切開的方塊（可關閉）、顯示幀率（FPS，畫面左下角，VR 裡也看得到；綠色＝順暢、黃色＝稍慢、紅色＝明顯掉幀）、
+設定（網頁與 VR 選單共用並自動儲存）：不會失敗、自動遊玩、譜面自訂顏色、Chroma 燈光與顏色、顯示牆壁 / 炸彈 / 切開的方塊（可關閉）、顯示幀率（FPS，畫面左下角，VR 裡也看得到；綠色＝順暢、黃色＝稍慢、紅色＝明顯掉幀）、
 VR 渲染解析度（50%～150%，下次進入 VR 生效；調低更順、調高更清楚）、VR 更新率（自動 / 72 / 80 / 90 / 120 Hz，依頭盔支援）、身高、音訊延遲、音量、打擊音效、
 光劍角度（光劍相對手把的傾斜）、光劍顏色、觀戰畫面、光劍 / 方塊模型、牆壁樣式。
 
@@ -137,7 +138,7 @@ js/songCache.js         歌曲與歌單儲存（IndexedDB）：清單、讀取�
 js/playlists.js         歌單：.bplist 解析、BeatSaver 歌單匯入、單首 / 全部下載
 js/unzipWorker.js       在背景執行緒解壓縮譜面 zip，載入大譜面時不會卡住畫面
 js/mapLoader.js         zip / 資料夾讀取、Info.dat 解析（v2 / v4）、譜面自訂顏色
-js/beatmap.js           難度檔解析（v2 / v3 / v4）、BPM 時間換算、鏈與弧線、NJS 變速曲線、最高分計算
+js/beatmap.js           難度檔解析（v2 / v3 / v4）、BPM 時間換算、鏈與弧線、NJS 變速曲線、最高分計算、Chroma 資料與緩動曲線
 js/beatsaver.js         BeatSaver API
 js/downloads.js         下載管理：排隊、暫停 / 繼續 / 取消、進度
 js/stylePreview.js      網頁「外觀」的 3D 預覽（光劍、方塊、牆壁）
@@ -151,6 +152,8 @@ js/game/Saber.js        光劍、軌跡、速度與揮劍角度追蹤
 js/game/Models.js       光劍 / 方塊 / 牆壁樣式、邊框發光著色器、自訂 glTF 模型載入與儲存
 js/game/Score.js        計分、連擊倍率、血量
 js/game/Environment.js  場景與燈光事件
+js/game/ChromaLighting.js  Chroma 燈光：逐燈狀態、漸層、過渡、光環與雷射動作（只透過 set(r, g, b) 控制燈）
+js/game/lightIds.js     原版各場景每組燈數（Chroma lightID 對應用）
 js/game/FpsMeter.js     幀率顯示（跟著視線的小面板，每 0.5 秒更新）
 js/game/Hud.js          分數 / 連擊 / 血量面板與訊息看板
 js/game/Effects.js      切割碎片與火花

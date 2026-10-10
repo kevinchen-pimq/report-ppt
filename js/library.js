@@ -235,6 +235,9 @@ export class Library {
       difficultyName: diffName(diff),
       coverImage: entry.coverImage,
       colors: resolveColors(info, diff),
+      environment: diff.environment || null, // e.g. 'TimbalandEnvironment' (Chroma light IDs)
+      // Chroma: listed as a requirement / suggestion, or Chroma data in the difficulty
+      chroma: diff.chroma || map.chroma.used ? { mod: diff.chroma, used: map.chroma.used, white: diff.customColors?.envWhite ?? null, whiteBoost: diff.customColors?.envWhiteBoost ?? null } : null,
     };
     return { map, meta, set, diff };
   }

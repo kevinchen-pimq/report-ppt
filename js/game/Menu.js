@@ -836,6 +836,7 @@ export class Menu {
       const extra = [];
       if (m.njsEvents) extra.push(`NJS 變速事件 ${m.njsEvents}`);
       if (s.preview.meta.colors) extra.push(settings.get('useMapColors') ? '使用譜面自訂顏色' : '譜面有自訂顏色（已停用）');
+      if (s.preview.meta.chroma) extra.push(settings.get('chroma') ? 'Chroma' : 'Chroma（已停用）');
       p.text(`NJS ${m.njs} · NPS ${st.nps} · 譜面格式 v${m.version}${extra.length ? ` · ${extra.join(' · ')}` : ''}`, CX, 518, { size: 26, color: THEME.muted, maxWidth: CW });
       if (s.preview.meta.colors) this.colorSwatches(p, s.preview.meta.colors, CX, 545);
     } else if (s.error) p.text(`難度解析失敗：${s.error}`, CX, 500, { size: 26, color: THEME.red });
@@ -885,16 +886,17 @@ export class Menu {
       ['set-nofail', '不會失敗', 'noFail'],
       ['set-auto', '自動遊玩', 'autoplay'],
       ['set-mapcolors', '譜面自訂顏色', 'useMapColors'],
+      ['set-chroma', 'Chroma 燈光與顏色', 'chroma'],
       ['set-walls', '顯示牆壁', 'showWalls'],
       ['set-bombs', '顯示炸彈', 'showBombs'],
       ['set-debris', '顯示切開的方塊', 'showDebris'],
     ];
-    toggles.forEach(([id, label, key], i) => this.toggleRow(p, id, L, 105 + i * 72, label, key));
-    p.text('電腦螢幕觀戰', L, 575, { size: 30 });
+    toggles.forEach(([id, label, key], i) => this.toggleRow(p, id, L, 95 + i * 66, label, key));
+    p.text('電腦螢幕觀戰', L, 607, { size: 30 });
     [['third', '第三人稱'], ['first', '第一人稱'], ['off', '關閉']].forEach(([m, label], i) => {
-      p.button(`set-spec-${m}`, L + i * 152, 595, 142, 60, label, { size: 24, active: settings.get('spectator') === m, onClick: () => settings.set({ spectator: m }) });
+      p.button(`set-spec-${m}`, L + i * 152, 625, 142, 60, label, { size: 24, active: settings.get('spectator') === m, onClick: () => settings.set({ spectator: m }) });
     });
-    p.text('光劍顏色可在網頁設定中更改', L, 700, { size: 22, color: THEME.muted });
+    p.text('光劍顏色可在網頁設定中更改', L, 725, { size: 22, color: THEME.muted });
 
     const pct = (v) => `${Math.round(v * 100)}%`;
     this.stepperRow(p, 'set-vol', R, 95, '音樂音量', 'volume', pct);
