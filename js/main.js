@@ -97,7 +97,7 @@ $('now-cover').addEventListener('click', (ev) => {
 
 // ---------------------------------------------------------------------------
 // Settings (shared with the in-VR menu through the settings store)
-const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'saberFlip', 'showWalls', 'showBombs', 'showDebris'];
+const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'saberFlip', 'showWalls', 'showBombs', 'showDebris', 'showFps'];
 const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle'];
 const RANGES_UI = {
   playerHeight: (v) => `${Number(v).toFixed(2)} m`,

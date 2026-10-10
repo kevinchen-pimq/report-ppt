@@ -23,6 +23,7 @@ export const DEFAULTS = {
   showWalls: true, // false = maps play without walls
   showBombs: true, // false = maps play without bombs
   showDebris: true, // false = cut blocks vanish instead of splitting into halves
+  showFps: false, // frame-rate counter in the lower left of the view
 };
 
 // Ranges and steps used by both UIs

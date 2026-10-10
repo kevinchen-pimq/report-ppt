@@ -903,6 +903,7 @@ export class Menu {
     this.stepperRow(p, 'set-latency', R, 380, '音訊延遲', 'audioLatencyMs', (v) => `${v > 0 ? '+' : ''}${v} ms`);
     this.stepperRow(p, 'set-height', R, 470, '身高', 'playerHeight', (v) => `${v.toFixed(2)} m`);
     p.button('set-go-cal', R, 575, 470, 70, '前往身高 / 延遲校正', { size: 26, onClick: () => this.open('calibrate') });
+    this.toggleRow(p, 'set-fps', R, 662, '顯示幀率 (FPS)', 'showFps');
   }
 
   // ----- appearance -------------------------------------------------------------

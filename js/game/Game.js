@@ -8,6 +8,7 @@ import { Saber } from './Saber.js';
 import { ScoreKeeper } from './Score.js';
 import { GameAudio } from './Audio.js';
 import { Spectator } from './Spectator.js';
+import { FpsMeter } from './FpsMeter.js';
 import { Menu } from './Menu.js';
 import { Pointers } from './ui/Pointers.js';
 import { LatencyCalibrator } from './Calibration.js';
@@ -87,6 +88,7 @@ export class Game {
     );
     this.wallShade.renderOrder = 100;
     this.camera.add(this.wallShade);
+    this.fps = new FpsMeter(this.camera);
 
     // Third-person / smoothed view on the PC monitor while in VR
     this.spectator = new Spectator(this.scene);
@@ -126,6 +128,7 @@ export class Game {
     // Gameplay options: take effect immediately (switching off removes what's on screen)
     this.notes.setOptions({ walls: s.showWalls !== false, bombs: s.showBombs !== false });
     this.effects.setShowDebris(s.showDebris !== false);
+    this.fps.setEnabled(s.showFps);
     if (this.state !== 'playing') {
       setPlayerHeight(s.playerHeight);
       this.applyColors();
@@ -317,6 +320,9 @@ export class Game {
     });
     await this.renderer.xr.setSession(session);
     this.xrSession = session;
+    // the frame-rate counter judges against the headset's refresh rate
+    this.fps.setTarget(session.frameRate || 72);
+    session.addEventListener('frameratechange', () => this.fps.setTarget(session.frameRate));
     this.spectator.start();
     if (pending) this.playEntry(pending.entry, pending.setIdx, pending.diffIdx);
     else this.showMenu(this.library.entries.length ? 'library' : 'browse');
@@ -341,6 +347,7 @@ export class Game {
 
   onSessionEnd() {
     this.xrSession = null;
+    this.fps.setTarget(60);
     this.stopPreview();
     this.spectator.stop();
     this.mode = 'desktop';
@@ -786,7 +793,8 @@ export class Game {
     this.menu.update(dt);
     this.effects.update(dt);
     this.renderer.render(this.scene, this.camera);
-    if (xr) this.spectator.render(this.renderer.xr.getCamera(), this.sabers, [this.wallShade], dt);
+    if (xr) this.spectator.render(this.renderer.xr.getCamera(), this.sabers, [this.wallShade, this.fps.mesh], dt);
+    this.fps.tick(nowMs);
   }
 
   onResize() {
