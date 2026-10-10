@@ -14,8 +14,7 @@
 // ArcViewer's community recreation (facts only). Pyramid size / loop heights: approximate.
 // Rings: 'small' = the 20 pyramid rings (event 8 spin, event 9 zoom 1 m ↔ 3 m spacing),
 // 'big' = the 20 back rings (spin). No lasers (no laser-speed events in this environment).
-import { THREE } from './kit.js';
-import { LightSet, Rig, InstBank, barXYZ, stdMat, mergeGeos } from './_dKit.js';
+import { THREE, GEO, GlowBank, Rig, PropBank, barXYZ, stdMat, mergeGeos } from './kit.js';
 
 const CY = 1.5; // ring centre height
 const RB = 15; // radial distance of the pyramid base
@@ -43,11 +42,11 @@ export default {
     const block = stdMat(0x10131f, { roughness: 0.5, metalness: 0.4 });
     const owned = [dark, block];
 
-    const lights = new LightSet(root, { max: 720, glowOpacity: 0.16 });
+    const lights = new GlowBank(root, GEO.box, 720, { haloOpacity: 0.16 });
     const rig = new Rig(root);
     const pyrGeo = new THREE.ConeGeometry(HD, RB - RT + 0.6, 4, 1, false);
     owned.push(pyrGeo);
-    const bodies = new InstBank(root, pyrGeo, dark, 40);
+    const bodies = new PropBank(root, pyrGeo, dark, 40);
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
     const outer = [];
     const tmp = new THREE.Matrix4();

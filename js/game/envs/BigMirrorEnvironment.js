@@ -18,8 +18,7 @@
 // with y-mirrored instances; 1 extra draw call, no render-to-texture).
 // Default colours: Big Mirror uses Beat Saber's "The First" scheme (BSMG wiki, Default Environment Colors).
 import { THREE } from './kit.js';
-import { ClassicKit, U, towerBlocks } from './_classicShared.js';
-import { bigRings, chevron, trackLasers, rotatingLasers } from './_classicParts.js';
+import { ClassicKit, U, towerBlocks, bigRings, chevron, trackLasers, rotatingLasers } from './_classic.js';
 
 const HALF_W = 9.75;
 const Z_NEAR = 6;

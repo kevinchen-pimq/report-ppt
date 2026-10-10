@@ -14,10 +14,8 @@
 // facts only; it numbers each laser row 2…18, so ID 1 is taken to be the outermost laser of the
 // row). The castle-interior light is "approximate" (the game drives it with event 4 as well).
 // Default colours: Beat Saber Spooky scheme (as listed by ArcViewer / ChroMapper / BSMG wiki).
-import { THREE, LightBank, GEO, tubeMatrix, trs, mergeStatic } from './kit.js';
-import { MultiLight, rng, softLightMaterial, glowDiscGeometry, skyDome, SpinBank } from './_eShared.js';
+import { THREE, LightBank, GEO, MultiLight, Rig, V, rng, tubeMatrix, trs, mergeStatic, softLightMaterial, glowDiscGeometry, skyDome } from './kit.js';
 
-const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const CASTLE_Z = -112;
 
 export default {
@@ -216,8 +214,10 @@ export default {
 
     // 2 / 3: two rows of searchlight lasers behind the castle, leaning towards the centre so the
     // rows cross over the walkway; laser speed spins each beam around the vertical (a cone sweep)
-    const spin = new SpinBank(root, GEO.tube, 36);
-    banks.push(spin.bank);
+    // one bank for all 36 beams; each beam follows its own pivot (spun by the runtime)
+    const rig = new Rig(root);
+    const spinBank = new LightBank(root, GEO.tube, 36);
+    banks.push(spinBank);
     const lasers = { left: [], right: [] };
     const local = new THREE.Matrix4();
     const base = new THREE.Matrix4();
@@ -227,8 +227,8 @@ export default {
       tubeMatrix(V(0, 0, 0), dir.multiplyScalar(320), 0.16, local);
       for (let i = 0; i < 18; i++) {
         base.makeTranslation(s * (86.2 - i * 3.75), 0, -97.5 - (i % 2) * 2);
-        const { light, pivot } = spin.add(base, local, 'y');
-        groups[type].push(light);
+        const pivot = rig.proxy(0, 0, 0, 0, 0, 0, 'y');
+        groups[type].push(rig.light(pivot, spinBank, local, null, base));
         list.push(pivot);
       }
     }
@@ -240,7 +240,7 @@ export default {
       rings: [],
       lasers,
       update() {
-        spin.sync();
+        rig.update();
       },
       dispose() {
         for (const b of banks) b.dispose();

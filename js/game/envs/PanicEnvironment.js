@@ -18,9 +18,11 @@
 // Lasers: 12 / 13 spin the side lasers around the vertical axis.
 // ID order / counts source: community light-ID mapping as used by ArcViewer's Panic recreation
 // (facts only) plus the BSMG wiki environment notes; sizes / positions approximate.
-import { THREE, GEO, trs, mergeStatic, sceneryMaterials, LightBank, lightMaterial } from './kit.js';
+import { THREE, GEO, trs, mergeStatic, sceneryMaterials, LightBank, lightMaterial, GlowBank, PropBank, Rig, MultiLight, rotatingLaser, rng, boxAt, V } from './kit.js';
+
+// glow banks: faint halo (opacity 0.22) drawn after the cores
+const BX_GLOW = { haloOpacity: 0.22, haloRenderOrder: 1 };
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { GlowBank, SceneryBank, Rig, MultiLight, rigLight, rigScenery, rotatingLaser, rng, boxAt, V } from './_bxKit.js';
 
 const RINGS = 30;
 
@@ -123,8 +125,8 @@ export default {
     owned.push(pyrMesh.geometry);
 
     // ---------- lights ----------
-    const tubes = new GlowBank(root, GEO.tube, 32);
-    const bars = new GlowBank(root, GEO.box, RINGS * 2);
+    const tubes = new GlowBank(root, GEO.tube, 32, BX_GLOW);
+    const bars = new GlowBank(root, GEO.box, RINGS * 2, BX_GLOW);
 
     // 0: bottom lasers crossing under the track (1 right-hand, 2 left-hand)
     for (const s of [1, -1]) {
@@ -137,18 +139,18 @@ export default {
     // 1: rings — light bar on top and bottom of each ring, dark blocks at the sides
     const ringMat = new THREE.MeshStandardMaterial({ color: 0x2a2c40, roughness: 0.5, metalness: 0.3 });
     owned.push(ringMat);
-    const ringBodies = new SceneryBank(root, GEO.box, RINGS * 2, ringMat);
+    const ringBodies = new PropBank(root, GEO.box, ringMat, RINGS * 2);
     const ringObjs = [];
     for (let i = 0; i < RINGS; i++) {
       const o = new THREE.Object3D();
       o.position.set(0, 0.8, -8 - i * 1.5);
       root.add(o);
       ringObjs.push(o);
-      const p = rig.pivot(o);
+      const p = rig.track(o);
       for (const y of [4, -4]) {
-        groups[1].push(rigLight(rig, p, bars, trs([0, y, 0], [0, 0, 0], [1.1, 0.3, 0.3]), trs([0, y, 0], [0, 0, 0], [1.35, 0.7, 0.7])));
+        groups[1].push(rig.light(p, bars, trs([0, y, 0], [0, 0, 0], [1.1, 0.3, 0.3]), trs([0, y, 0], [0, 0, 0], [1.35, 0.7, 0.7])));
       }
-      for (const x of [4.2, -4.2]) rigScenery(rig, p, ringBodies, trs([x, 0, 0], [0, 0, Math.PI / 2], [1.2, 0.4, 0.4]));
+      for (const x of [4.2, -4.2]) rig.attach(p, ringBodies, trs([x, 0, 0], [0, 0, Math.PI / 2], [1.2, 0.4, 0.4]));
     }
     // 61 / 62 pillar lasers behind the pillar rows
     for (const s of [-1, 1]) groups[1].push(tubes.tube(V(s * 5.9, -4, 30), V(s * 5.9, -4, -300), 0.08, 3));
@@ -182,7 +184,7 @@ export default {
     for (const s of [-1, 1]) groups[4].push(tubes.tube(V(s * 0.6, 0.01, -40), V(s * 0.6, 0.01, -260), 0.035, 3.5));
 
     rig.update(true);
-    const banks = [...tubes.banks, ...bars.banks, ringBodies.bank, glassBank, glowBank, frameBank];
+    const banks = [...tubes.banks, ...bars.banks, ringBodies, glassBank, glowBank, frameBank];
     return {
       root,
       banks,

@@ -15,8 +15,7 @@
 // Rings: 15 big lit rings (event 8 spin, step 5°), 30 small dark rings (spin step 5°, event 9 zoom 2 ↔ 5 m).
 // Lasers 12 / 13: the 4 + 4 rotating lasers (cone sweep around the vertical).
 // Default colours: Beat Saber "The First" scheme (BSMG wiki, Default Environment Colors).
-import { ClassicKit, U, towerBlocks, floatingTrack } from './_classicShared.js';
-import { bigRings, smallRings, chevron, trackLasers, rotatingLasers } from './_classicParts.js';
+import { ClassicKit, U, towerBlocks, floatingTrack, bigRings, smallRings, chevron, trackLasers, rotatingLasers } from './_classic.js';
 
 export default {
   name: 'DefaultEnvironment',

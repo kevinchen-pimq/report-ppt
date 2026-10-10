@@ -17,10 +17,11 @@
 // in ChroMapper's community Billie platform (read for facts only). Not handled here: rain toggle
 // (event 8 in this environment) and ray mode (event 9) — the contract maps 8/9 to rings.
 // Default colours: Beat Saber Billie scheme (as listed by ArcViewer / ChroMapper / BSMG wiki).
-import { THREE, LightBank, GEO, tubeMatrix, trs, mergeStatic, lightMaterial } from './kit.js';
-import { MultiLight, rng, softLightMaterial, glowDiscGeometry, fadeStripGeometry, skyDome, ridgeGeometry } from './_eShared.js';
+import {
+  THREE, LightBank, GEO, MultiLight, V, rng, tubeMatrix, trs, mergeStatic,
+  softLightMaterial, glowDiscGeometry, fadeStripGeometry, skyDome, ridgeGeometry,
+} from './kit.js';
 
-const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const WATER_Y = -0.55;
 const SUN = V(0, 15, -140);
 

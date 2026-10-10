@@ -17,8 +17,7 @@
 // positions: ArcViewer's community recreation (facts only). Ceiling bar pair order: approximate.
 // Event 12 / 13 (laser speed) spin each tunnel laser line around the tunnel axis (one pivot each,
 // random phase). No rings (event 8 "laser mode" is not modelled by the contract).
-import { THREE, GEO } from './kit.js';
-import { LightSet, Rig, MultiLight, barXYZ, wash, stdMat, mergeGeos } from './_dKit.js';
+import { THREE, GEO, GlowBank, Rig, MultiLight, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const TUNNEL_R = 3.8; // half width of the tunnel = radius of the arch
 const ARCH_Y = 1.0; // arch centre height
@@ -98,7 +97,7 @@ export default {
     owned.push(floorGeo);
 
     // ---- lights -----------------------------------------------------------------------------
-    const lights = new LightSet(root, { max: 96, glowOpacity: 0.18 });
+    const lights = new GlowBank(root, GEO.box, 96, { haloOpacity: 0.18 });
     const rig = new Rig(root);
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
 

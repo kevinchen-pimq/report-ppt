@@ -13,8 +13,7 @@
 // Lasers 12 / 13: the 5 + 5 rotating lasers (cone sweep around the vertical).
 // Default colours: Beat Saber "Origins" scheme (BSMG wiki, Default Environment Colors).
 import { THREE } from './kit.js';
-import { ClassicKit, U } from './_classicShared.js';
-import { chevron, trackLasers, rotatingLasers } from './_classicParts.js';
+import { ClassicKit, U, chevron, trackLasers, rotatingLasers } from './_classic.js';
 
 export default {
   name: 'OriginsEnvironment',

@@ -20,9 +20,11 @@
 // Lasers: 12 / 13 spin the side lasers around the vertical axis.
 // ID order / counts source: community light-ID mapping as used by ArcViewer's Monstercat recreation
 // (facts only) plus the BSMG wiki environment notes; sizes / positions approximate.
-import { THREE, GEO, trs, mergeStatic, sceneryMaterials, LightBank, lightMaterial } from './kit.js';
+import { THREE, GEO, trs, mergeStatic, sceneryMaterials, LightBank, lightMaterial, GlowBank, PropBank, Rig, MultiLight, rotatingLaser, rng, boxAt, V } from './kit.js';
+
+// glow banks: faint halo (opacity 0.22) drawn after the cores
+const BX_GLOW = { haloOpacity: 0.22, haloRenderOrder: 1 };
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { GlowBank, SceneryBank, Rig, MultiLight, rigScenery, rotatingLaser, rng, boxAt, V } from './_bxKit.js';
 
 const RINGS = 20;
 
@@ -107,7 +109,7 @@ export function buildMonstercat() {
   // ---------- ring frames (diamonds) ----------
   const ringMat = new THREE.MeshStandardMaterial({ color: 0x2c3046, roughness: 0.4, metalness: 0.35 });
   owned.push(ringMat);
-  const ringBodies = new SceneryBank(root, GEO.box, RINGS * 4 + 8, ringMat);
+  const ringBodies = new PropBank(root, GEO.box, ringMat, RINGS * 4 + 8);
   const ringObjs = [];
   const R = 8.6; // half-diagonal
   for (let i = 0; i < RINGS; i++) {
@@ -115,16 +117,16 @@ export function buildMonstercat() {
     o.position.set(0, 2.6, -21 - i * 8);
     root.add(o);
     ringObjs.push(o);
-    const p = rig.pivot(o);
+    const p = rig.track(o);
     for (let e = 0; e < 4; e++) {
       const ang = Math.PI / 4 + (e * Math.PI) / 2;
       const d = R / Math.SQRT2; // centre -> edge midpoint
-      rigScenery(rig, p, ringBodies, trs([Math.cos(ang) * d, Math.sin(ang) * d, 0], [0, 0, ang + Math.PI / 2], [R * Math.SQRT2 + 0.5, 0.5, 0.5]));
+      rig.attach(p, ringBodies, trs([Math.cos(ang) * d, Math.sin(ang) * d, 0], [0, 0, ang + Math.PI / 2], [R * Math.SQRT2 + 0.5, 0.5, 0.5]));
     }
   }
 
   // ---------- lights ----------
-  const tubes = new GlowBank(root, GEO.tube, 64);
+  const tubes = new GlowBank(root, GEO.tube, 64, BX_GLOW);
   const tilt = (55 * Math.PI) / 180;
 
   // 0: bottom lasers fanning down and outward from under the track
@@ -177,7 +179,7 @@ export function buildMonstercat() {
   }
 
   rig.update(true);
-  const banks = [...tubes.banks, embBank, embHaloBank, ringBodies.bank];
+  const banks = [...tubes.banks, embBank, embHaloBank, ringBodies];
   return {
     root,
     banks,

@@ -1,5 +1,5 @@
 // Green Day Grenade environment — our own recreation from simple shapes (no game assets); shared builder
-// in _cGreenDay.js. Same street as Green Day (speaker stages, city, bridge, heart-grenade fist, logo,
+// in _greenDay.js. Same street as Green Day (speaker stages, city, bridge, heart-grenade fist, logo,
 // beam bundles, laser fans) but without the rings: event 1 drives the "ambiance" instead, here window
 // bands on the buildings closest to the runway. No ring spin / zoom.
 //
@@ -14,7 +14,7 @@
 //   3  right lasers   6  same on the right
 //   4  center lights  5  1 GREEN DAY logo, 2 / 3 vertical beam bundles L / R, 4 heart grenade, 5 its drips
 // rings: none. lasers: 6 + 6 (spin around Z at their emitters).
-import { buildGreenDay, GREEN_DAY_COLORS } from './_cGreenDay.js';
+import { buildGreenDay, GREEN_DAY_COLORS } from './_greenDay.js';
 
 export default {
   name: 'GreenDayGrenadeEnvironment',

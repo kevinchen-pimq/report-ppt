@@ -1,5 +1,5 @@
 // Green Day environment — our own recreation from simple shapes (no game assets); shared builder in
-// _cGreenDay.js. Look: a night-time city street: stages with stacks of guitar-amp speaker cabinets
+// _greenDay.js. Look: a night-time city street: stages with stacks of guitar-amp speaker cabinets
 // right beside the player, their outlines glowing on the floor; dark buildings down both sides and a
 // bridge far ahead; a raised fist holding the heart-shaped grenade left of the runway; the GREEN DAY
 // logo over the far runway between two bundles of vertical beams; laser fans raking down from high up
@@ -16,7 +16,7 @@
 //   3  right lasers   6  same on the right
 //   4  center lights  5  1 GREEN DAY logo, 2 / 3 vertical beam bundles L / R, 4 heart grenade, 5 its drips
 // rings: big × 10 (spin + zoom). lasers: 6 + 6 (spin around Z at their emitters).
-import { buildGreenDay, GREEN_DAY_COLORS } from './_cGreenDay.js';
+import { buildGreenDay, GREEN_DAY_COLORS } from './_greenDay.js';
 
 export default {
   name: 'GreenDayEnvironment',

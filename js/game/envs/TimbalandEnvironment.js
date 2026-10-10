@@ -17,8 +17,7 @@
 //                          top bar, 5 chevron right top bar, 6 chevron right arm
 // rings: big × 10 (spin + zoom). lasers: left = the 10 left side lasers, right = the 10 right ones
 // (each spins around its ring's X axis, so it sweeps a fan but never crosses the runway).
-import { THREE, GEO, trs, mergeStatic, sceneryMaterials } from './kit.js';
-import { V, GlowBank, PropBank, Followers, strokeText, mergeAll, beamGeometry } from './_cKit.js';
+import { THREE, GEO, trs, mergeStatic, sceneryMaterials, V, GlowBank, PropBank, Rig, strokeText, mergeAll, beamGeometry } from './kit.js';
 
 const RING_N = 10;
 const RING_Z0 = -34;
@@ -42,10 +41,10 @@ export default {
     const mats = sceneryMaterials();
     const trussMat = new THREE.MeshStandardMaterial({ color: 0x1c1a2c, roughness: 0.55, metalness: 0.55 });
     const logoMat = new THREE.MeshBasicMaterial({ color: 0x3f7dff, toneMapped: false, fog: false });
-    const follow = new Followers();
+    const rig = new Rig();
     const m = new THREE.Matrix4();
 
-    const glow = new GlowBank(root, GEO.tube, 120, { halo: 3, haloOpacity: 0.17 });
+    const glow = new GlowBank(root, GEO.tube, 120, { haloScale: 3, haloOpacity: 0.17 });
     const ringProps = new PropBank(root, GEO.box, trussMat, RING_N * 3);
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
     const lasers = { left: [], right: [] };
@@ -60,8 +59,8 @@ export default {
       root.add(ring);
       rings.push(ring);
       // ring body: two dark posts and a thin top bar
-      for (const s of [-1, 1]) follow.add(ringProps, ringProps.add(trs([s * (RING_X + 0.35), 0, 0], [0, 0, 0], [0.35, 8.4, 0.35], m)), ring, m);
-      follow.add(ringProps, ringProps.add(trs([0, 4.2, 0], [0, 0, 0], [2 * RING_X + 1, 0.3, 0.3], m)), ring, m);
+      for (const s of [-1, 1]) rig.attach(ring, ringProps, trs([s * (RING_X + 0.35), 0, 0], [0, 0, 0], [0.35, 8.4, 0.35], m));
+      rig.attach(ring, ringProps, trs([0, 4.2, 0], [0, 0, 0], [2 * RING_X + 1, 0.3, 0.3], m));
 
       for (const [s, list] of [[-1, lasers.left], [1, lasers.right]]) {
         // 0: side laser, on its own pivot (child of the ring) so laser-speed events can spin it
@@ -70,15 +69,15 @@ export default {
         pivot.userData.axis = 'x';
         ring.add(pivot);
         list.push(pivot);
-        groups[0].push(glow.tubeFollow(follow, [ring, pivot], V(0, 0, 0), V(s * SIDE_LEN * c45, 0, -SIDE_LEN * c45), 0.05));
+        groups[0].push(rig.tube([ring, pivot], glow, V(0, 0, 0), V(s * SIDE_LEN * c45, 0, -SIDE_LEN * c45), 0.05));
       }
       for (const s of [-1, 1]) {
         // 1: intra-ring vertical bars
-        groups[1].push(glow.tubeFollow(follow, ring, V(s * (RING_X - 0.35), -3.3, 0), V(s * (RING_X - 0.35), 3.3, 0), 0.07));
+        groups[1].push(rig.tube(ring, glow, V(s * (RING_X - 0.35), -3.3, 0), V(s * (RING_X - 0.35), 3.3, 0), 0.07));
       }
       // 2 / 3: tall vertical ring lasers just outside the posts
-      groups[2].push(glow.tubeFollow(follow, ring, V(-(RING_X + 0.9), -60, 0), V(-(RING_X + 0.9), 60, 0), 0.04));
-      groups[3].push(glow.tubeFollow(follow, ring, V(RING_X + 0.9, -60, 0), V(RING_X + 0.9, 60, 0), 0.04));
+      groups[2].push(rig.tube(ring, glow, V(-(RING_X + 0.9), -60, 0), V(-(RING_X + 0.9), 60, 0), 0.04));
+      groups[3].push(rig.tube(ring, glow, V(RING_X + 0.9, -60, 0), V(RING_X + 0.9, 60, 0), 0.04));
     }
 
     // ---- center lights: runway strips + chevron
@@ -154,7 +153,7 @@ export default {
     root.add(logo);
     box.dispose();
 
-    follow.update(true);
+    rig.update(true);
     const banks = [...glow.banks, ringProps];
     return {
       root,
@@ -163,7 +162,7 @@ export default {
       rings: [{ type: 'big', objects: rings, step: 5, zoom: { near: 1.6, far: RING_DZ } }],
       lasers,
       update() {
-        follow.update();
+        rig.update();
       },
       dispose() {
         glow.dispose();

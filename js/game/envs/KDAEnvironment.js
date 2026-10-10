@@ -19,8 +19,10 @@
 // ID order / counts source: community light-ID mapping as used by ArcViewer's K/DA recreation
 // (facts only) plus the BSMG wiki environment notes. The stick layout is our own random scatter
 // (the order near -> far follows the mapping); sizes / positions are approximate.
-import { THREE, GEO, trs, mergeStatic, sceneryMaterials } from './kit.js';
-import { GlowBank, Rig, rotatingLaser, rng, boxAt, V } from './_bxKit.js';
+import { THREE, GEO, trs, mergeStatic, sceneryMaterials, GlowBank, Rig, rotatingLaser, rng, boxAt, V } from './kit.js';
+
+// glow banks: faint halo (opacity 0.22) drawn after the cores
+const BX_GLOW = { haloOpacity: 0.22, haloRenderOrder: 1 };
 
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
@@ -93,8 +95,8 @@ export default {
     owned.push(darkMesh.geometry, metalMesh.geometry);
 
     // ---------- lights ----------
-    const tubes = new GlowBank(root, GEO.tube, 128);
-    const crystals = new GlowBank(root, GEO.box, 2);
+    const tubes = new GlowBank(root, GEO.tube, 128, BX_GLOW);
+    const crystals = new GlowBank(root, GEO.box, 2, BX_GLOW);
 
     // 0: bottom lasers, vertical beams under the glass floor
     for (const z of [-15, -25, -35]) {

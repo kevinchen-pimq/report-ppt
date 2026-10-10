@@ -73,7 +73,8 @@ const groups = env.groups || {};
 const types = Object.keys(groups).map(Number).sort((a, b) => a - b);
 const rings = env.rings || [];
 const lasers = env.lasers || { left: [], right: [] };
-for (const o of [...lasers.left, ...lasers.right]) o.userData.phase = Math.random() * Math.PI * 2;
+// deterministic phases (same picture on every load, for before / after screenshot diffs)
+[...lasers.left, ...lasers.right].forEach((o, i) => (o.userData.phase = (i * 2.399) % (Math.PI * 2)));
 
 function setAll(type, rgb, k = 1) {
   for (const l of groups[type] || []) l.set(rgb[0] * k, rgb[1] * k, rgb[2] * k);

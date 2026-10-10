@@ -18,8 +18,10 @@
 // ID order / counts source: community light-ID mapping as used by ArcViewer's Dragons recreation
 // (facts only), cross-checked against the BSMG wiki environment notes. Sizes / positions approximate.
 // Not supported by the contract: in the game the back lasers show the opposite colour.
-import { THREE, GEO, trs, mergeStatic, sceneryMaterials } from './kit.js';
-import { GlowBank, SceneryBank, Rig, rigLight, rigScenery, rotatingLaser, rng, boxAt, beamBetween, V } from './_bxKit.js';
+import { THREE, GEO, trs, mergeStatic, sceneryMaterials, GlowBank, PropBank, Rig, rotatingLaser, rng, boxAt, beamBetween, V } from './kit.js';
+
+// glow banks: faint halo (opacity 0.22) drawn after the cores
+const BX_GLOW = { haloOpacity: 0.22, haloRenderOrder: 1 };
 
 const BIG_RINGS = 15;
 const SMALL_RINGS = 30;
@@ -84,14 +86,14 @@ export default {
     owned.push(darkMesh.geometry, metalMesh.geometry);
 
     // ---------- light banks ----------
-    const tubes = new GlowBank(root, GEO.tube, 32);
-    const bars = new GlowBank(root, GEO.box, BIG_RINGS * 4 + 4);
+    const tubes = new GlowBank(root, GEO.tube, 32, BX_GLOW);
+    const bars = new GlowBank(root, GEO.box, BIG_RINGS * 4 + 4, BX_GLOW);
 
     // group 0: back wires, far out to the sides below the track
     for (const s of [-1, 1]) groups[0].push(tubes.tube(V(s * 18.5, -6, 30), V(s * 18.5, -6, -260), 0.12, 4));
 
     // ---------- big rings (diamonds) ----------
-    const ringBodies = new SceneryBank(root, GEO.box, BIG_RINGS * 4, mats.metal);
+    const ringBodies = new PropBank(root, GEO.box, mats.metal, BIG_RINGS * 4);
     const R = 44; // half-diagonal of the diamond
     const bigRings = [];
     const edge = R * Math.SQRT2;
@@ -100,13 +102,13 @@ export default {
       o.position.set(0, 6.25, -7 - k * 10);
       root.add(o);
       bigRings.push(o);
-      const p = rig.pivot(o);
+      const p = rig.track(o);
       // four frame edges (dark)
       for (let e = 0; e < 4; e++) {
         const ang = Math.PI / 4 + (e * Math.PI) / 2; // edge midpoint direction
         const mx = Math.cos(ang) * (R / Math.SQRT2);
         const my = Math.sin(ang) * (R / Math.SQRT2);
-        rigScenery(rig, p, ringBodies, trs([mx, my, 0], [0, 0, ang + Math.PI / 2], [edge, 0.7, 0.7]));
+        rig.attach(p, ringBodies, trs([mx, my, 0], [0, 0, ang + Math.PI / 2], [edge, 0.7, 0.7]));
       }
       // light bars on the edge midpoints, slightly in front of the frame (ID order: UR, LL, LR, UL)
       for (const [dx, dy] of [[1, 1], [-1, -1], [1, -1], [-1, 1]]) {
@@ -115,7 +117,7 @@ export default {
         const my = dy * (R / 2 - 0.3);
         const local = trs([mx, my, 0.5], [0, 0, ang + Math.PI / 2], [13, 0.38, 0.4]);
         const halo = trs([mx, my, 0.5], [0, 0, ang + Math.PI / 2], [13.4, 1.0, 1.0]);
-        groups[1].push(rigLight(rig, p, bars, local, halo));
+        groups[1].push(rig.light(p, bars, local, halo));
       }
     }
     // ring group 61 / 62: bottom wires under the track
@@ -123,19 +125,19 @@ export default {
 
     // ---------- small rings: two arcs of stepped blocks ----------
     const ringMat = new THREE.MeshStandardMaterial({ color: 0x3b3f58, roughness: 0.45, metalness: 0.25 });
-    const smallBodies = new SceneryBank(root, GEO.box, SMALL_RINGS * 14, ringMat);
+    const smallBodies = new PropBank(root, GEO.box, ringMat, SMALL_RINGS * 14);
     const smallRings = [];
     for (let i = 0; i < SMALL_RINGS; i++) {
       const o = new THREE.Object3D();
       o.position.set(0, 1.5, -17 - i * 1.75);
       root.add(o);
       smallRings.push(o);
-      const p = rig.pivot(o);
+      const p = rig.track(o);
       for (const base of [Math.PI / 2, -Math.PI / 2]) {
         for (let b = 0; b < 7; b++) {
           const a = base + ((b - 3) / 3) * 0.95;
           const rr = 4.6 + (b % 2) * 0.18;
-          rigScenery(rig, p, smallBodies, trs([Math.cos(a) * rr, Math.sin(a) * rr, 0], [0, 0, a], [0.5, 0.95, 0.32]));
+          rig.attach(p, smallBodies, trs([Math.cos(a) * rr, Math.sin(a) * rr, 0], [0, 0, a], [0.5, 0.95, 0.32]));
         }
       }
     }
@@ -162,7 +164,7 @@ export default {
     }
 
     rig.update(true);
-    const banks = [...tubes.banks, ...bars.banks, ringBodies.bank, smallBodies.bank];
+    const banks = [...tubes.banks, ...bars.banks, ringBodies, smallBodies];
     return {
       root,
       banks,

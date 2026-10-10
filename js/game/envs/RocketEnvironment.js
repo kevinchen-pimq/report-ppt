@@ -17,8 +17,7 @@
 //   3  right lasers   7  same on the right
 //   4  center lights  5  1 goal frame, 2 / 3 lane lights through the goal L / R, 4 / 5 small posts L / R
 // rings: none. lasers: 7 + 7 (each a tilted beam spinning around Y, so it sweeps a cone).
-import { THREE, GEO, mergeStatic, sceneryMaterials } from './kit.js';
-import { V, GlowBank, MultiLight, Followers, mergeAll, place } from './_cKit.js';
+import { THREE, GEO, mergeStatic, sceneryMaterials, V, GlowBank, MultiLight, Rig, mergeAll, place } from './kit.js';
 
 const GOAL_Z = -48;
 
@@ -38,7 +37,7 @@ export default {
     const mats = sceneryMaterials();
     const carMat = new THREE.MeshStandardMaterial({ color: 0x6a7088, roughness: 0.35, metalness: 0.6 });
     const rockMat = new THREE.MeshStandardMaterial({ color: 0x2b2627, roughness: 0.85, metalness: 0.1, flatShading: true });
-    const glow = new GlowBank(root, GEO.tube, 128, { halo: 3, haloOpacity: 0.17 });
+    const glow = new GlowBank(root, GEO.tube, 128, { haloScale: 3, haloOpacity: 0.17 });
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
     const multi = (segs, r) => new MultiLight(segs.map(([a, b]) => glow.tube(a, b, r)));
 
@@ -74,7 +73,7 @@ export default {
 
     // ---------------- groups 2 / 3: rotating lasers on two arcs behind the goal line
     const lasers = { left: [], right: [] };
-    const follow = new Followers();
+    const rig = new Rig();
     const arc = [[46, -35], [41, -41], [36, -45], [31, -48], [25.5, -50], [20, -52], [12.5, -56]];
     for (const [type, s, list] of [[2, -1, lasers.left], [3, 1, lasers.right]]) {
       for (const [x, z] of arc) {
@@ -84,7 +83,7 @@ export default {
         pivot.userData.axis = 'y'; // tilted beam spinning around Y sweeps a cone, always upward
         root.add(pivot);
         list.push(pivot);
-        groups[type].push(glow.tubeFollow(follow, pivot, V(0, 0, 0), V(-s * 120 * Math.sin(0.5), 120 * Math.cos(0.5), 0), 0.05));
+        groups[type].push(rig.tube(pivot, glow, V(0, 0, 0), V(-s * 120 * Math.sin(0.5), 120 * Math.cos(0.5), 0), 0.05));
       }
     }
 
@@ -183,7 +182,7 @@ export default {
     const floor = mergeStatic([floorMesh], mats.floor);
     root.add(floor, darkMesh, rockMesh, carMesh);
 
-    follow.update(true);
+    rig.update(true);
     const banks = [...glow.banks];
     return {
       root,
@@ -192,7 +191,7 @@ export default {
       rings: [],
       lasers,
       update() {
-        follow.update();
+        rig.update();
       },
       dispose() {
         glow.dispose();

@@ -19,8 +19,7 @@
 // Rings: two 'big' ring sets = the 30 slabs of each striped tower (event 8 "tower spin" rotates
 // them around the vertical axis). Event 9 (pillar control) is not modelled. Lasers: the 9 emitters
 // per side spin around the track axis with events 12 / 13.
-import { THREE } from './kit.js';
-import { LightSet, Rig, InstBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './_dKit.js';
+import { THREE, GEO, GlowBank, Rig, PropBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const D2R = Math.PI / 180;
 const PILLARS = [
@@ -94,7 +93,7 @@ export default {
       }
     }
     owned.push(puffGeo);
-    const clouds = new InstBank(root, puffGeo, cloudMat, 150);
+    const clouds = new PropBank(root, puffGeo, cloudMat, 150);
     {
       let seed = 7;
       const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
@@ -122,7 +121,7 @@ export default {
     const rig = new Rig(root);
     const slabGeo = new THREE.BoxGeometry(1, 1, 1);
     owned.push(slabGeo);
-    const slabs = new InstBank(root, slabGeo, towerMat, 60);
+    const slabs = new PropBank(root, slabGeo, towerMat, 60);
     const towers = [];
     for (const s of [-1, 1]) {
       const list = [];
@@ -141,7 +140,7 @@ export default {
     }
 
     // ---- lights -------------------------------------------------------------------------------
-    const lights = new LightSet(root, { max: 200, glowOpacity: 0.2 });
+    const lights = new GlowBank(root, GEO.box, 200, { haloOpacity: 0.2 });
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
 
     // 0: logo — two "doors" (trapezoid outlines), plus a dimmer reflection below

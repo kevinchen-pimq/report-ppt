@@ -21,10 +21,11 @@
 // Not handled: tower coil heights (events 12/13 and 16-19 in this environment) — the coil discs
 // stay at a fixed height; the contract's laser-speed objects are not used here.
 // Default colours: Beat Saber Lady Gaga scheme (as listed by ArcViewer / ChroMapper / BSMG wiki).
-import { THREE, LightBank, MeshLight, GEO, tubeMatrix, trs, mergeStatic, lightMaterial } from './kit.js';
-import { MultiLight, rng, softLightMaterial, glowDiscGeometry, skyDome, ridgeGeometry } from './_eShared.js';
+import {
+  THREE, LightBank, MeshLight, MultiLight, GEO, V, rng, tubeMatrix, trs, mergeStatic, lightMaterial,
+  softLightMaterial, glowDiscGeometry, skyDome, ridgeGeometry,
+} from './kit.js';
 
-const V = (x, y, z) => new THREE.Vector3(x, y, z);
 const FLOOR_Y = -3;
 const LOGO = V(0, 6.5, -74);
 

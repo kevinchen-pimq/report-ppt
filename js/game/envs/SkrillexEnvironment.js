@@ -23,9 +23,7 @@
 // Rings: 'big' = primary rings (event 8 spin), 'small' = secondary rings (spin; the official
 // environment spins them on event 9 together with a laser mode, there is no ring zoom).
 // Lasers: event 12 / 13 speed drives the 20 moving bars per side up and down.
-import { THREE } from './kit.js';
-import { LightBank } from './kit.js';
-import { LightSet, Rig, InstBank, MultiLight, barXYZ, stdMat } from './_dKit.js';
+import { THREE, LightBank, GEO, GlowBank, Rig, PropBank, MultiLight, barXYZ, stdMat } from './kit.js';
 
 const CY = 1.5; // the environment is mirrored around this height
 const NEAR = 25;
@@ -51,7 +49,7 @@ export default {
     const frameMat = stdMat(0x101016, { roughness: 0.45, metalness: 0.6 });
     const owned = [frameMat];
 
-    const lights = new LightSet(root, { max: 320, glowOpacity: 0.17 });
+    const lights = new GlowBank(root, GEO.box, 320, { haloOpacity: 0.17 });
     const rig = new Rig(root);
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [], 6: [], 7: [] };
     const line = (x, y, w = 0.07) => lights.light([{ m: barXYZ(x, y, NEAR, x, y, FAR, w) }], { fat: 4, glowGain: 0.8 });
@@ -79,7 +77,7 @@ export default {
     );
 
     // ---- diamond rings ------------------------------------------------------------------------
-    const frames = new InstBank(root, new THREE.BoxGeometry(1, 1, 1), frameMat, 40);
+    const frames = new PropBank(root, new THREE.BoxGeometry(1, 1, 1), frameMat, 40);
     owned.push(frames.mesh.geometry);
     const corners = [[-1, 0], [0, 1], [1, 0], [0, -1]]; // left, top, right, bottom
     const SEG = [[0.0, 0.18], [0.29, 0.71], [0.82, 1.0]]; // fractions of a side (R, M, L)

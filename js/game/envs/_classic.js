@@ -1,38 +1,24 @@
-// Shared building blocks for the "classic" environments (The First, Origins, Triangle, Nice, Big Mirror).
+// Shared building blocks for the "classic" environments (The First, Origins, Triangle, Nice, Big Mirror):
+// a soft cross-quad glow light bank (+ an optional clipped mirror bank), ring sets, laser pivots and
+// the parts these environments share (rings, chevron, track lasers, tower blocks …).
 // Our own simple geometry — no game or third-party assets.
 //
 // Draw-call strategy (Quest budget):
 //  - every light of an environment is one instance of ONE glow bank (crossed quads with a soft 1-D
 //    gradient texture, additive) → 1 draw call for all lasers, ring lights, strips and logos;
-//  - lights attached to moving objects (rings, laser pivots) are re-posed in update() from their parent
-//    object's transform (only when it changed, no allocations);
-//  - ring bodies are one InstancedMesh per ring type, posed the same way;
+//  - lights attached to moving objects (rings, laser pivots) follow them through a kit Rig;
+//  - ring bodies are one PropBank (instanced) per ring type, posed the same way;
 //  - static scenery is merged into one mesh per material.
-import { THREE, LightBank, GEO, mergeStatic, sceneryMaterials } from './kit.js';
+// Positions are mostly written in "Unity-style" coordinates through U(x, y, z) (z = distance ahead of
+// the player) and converted to our frame (player looks down -Z).
+import { THREE, LightBank, GEO, MultiLight, PropBank, Rig, tubeMatrix, mergeStatic, sceneryMaterials } from './kit.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 const DEG = Math.PI / 180;
-const _up = new THREE.Vector3(0, 1, 0);
-const _d = new THREE.Vector3();
-const _p = new THREE.Vector3();
-const _q = new THREE.Quaternion();
-const _s = new THREE.Vector3();
-const _m = new THREE.Matrix4();
-const _mm = new THREE.Matrix4();
 const MIRROR_Y = new THREE.Matrix4().makeScale(1, -1, 1);
 
 /** Unity-style coordinates (z forward = away from the player) → ours (player looks down -Z). */
 export const U = (x, y, z) => new THREE.Vector3(x, y, -z);
-
-/** Matrix for a unit glow quad-cross (width 1 along X/Z, length 1 along Y) stretched from a to b. */
-function lineMatrix(a, b, width, out) {
-  _d.subVectors(b, a);
-  const len = _d.length();
-  _p.addVectors(a, b).multiplyScalar(0.5);
-  _q.setFromUnitVectors(_up, _d.normalize());
-  _s.set(width, len, width);
-  return out.compose(_p, _q, _s);
-}
 
 let _glowTex = null;
 let _glowTexUsers = 0;
@@ -119,61 +105,8 @@ function crossGeometry() {
   return g;
 }
 
-/** One addressable light = a core glow instance (+ optional dimmed reflection instance). */
-class GlowLight {
-  constructor(core, mirror, k) {
-    this.core = core;
-    this.mirror = mirror;
-    this.k = k;
-  }
-  set(r, g, b) {
-    this.core.set(r, g, b);
-    if (this.mirror) this.mirror.set(r * this.k, g * this.k, b * this.k);
-  }
-}
-
-/** Tracks objects the runtime moves (rings, laser pivots) and re-poses what hangs on them. */
-class Followers {
-  constructor() {
-    this.items = [];
-  }
-  item(obj) {
-    let it = obj.userData.__follow;
-    if (!it) {
-      it = { obj, key: new Float64Array(6).fill(NaN), lights: [], bodies: [] };
-      obj.userData.__follow = it;
-      this.items.push(it);
-    }
-    return it;
-  }
-  update(force = false) {
-    for (const it of this.items) {
-      const o = it.obj;
-      const k = it.key;
-      const p = o.position;
-      const r = o.rotation;
-      if (!force && k[0] === p.x && k[1] === p.y && k[2] === p.z && k[3] === r.x && k[4] === r.y && k[5] === r.z) continue;
-      k[0] = p.x; k[1] = p.y; k[2] = p.z; k[3] = r.x; k[4] = r.y; k[5] = r.z;
-      o.updateMatrix();
-      for (const e of it.lights) {
-        _m.multiplyMatrices(o.matrix, e.local);
-        e.core.bank.setMatrix(e.core.index, _m);
-        if (e.mirror) {
-          _mm.multiplyMatrices(MIRROR_Y, _m);
-          e.mirror.bank.setMatrix(e.mirror.index, _mm);
-        }
-      }
-      for (const b of it.bodies) {
-        _m.multiplyMatrices(o.matrix, b.local);
-        b.mesh.setMatrixAt(b.index, _m);
-        b.mesh.instanceMatrix.needsUpdate = true;
-      }
-    }
-  }
-}
-
 /**
- * Environment build context: root, one glow bank (+ optional reflection bank), followers, static boxes.
+ * Environment build context: root, one glow bank (+ optional reflection bank), rig, static boxes.
  * `mirror`: { halfWidth, zNear, zFar, k } enables reflected copies of lights (Big Mirror).
  */
 export class ClassicKit {
@@ -181,7 +114,7 @@ export class ClassicKit {
     this.root = new THREE.Group();
     this.mats = sceneryMaterials();
     this.owned = [];
-    this.followers = new Followers();
+    this.rig = new Rig();
     this.geo = crossGeometry();
     this.owned.push(this.geo);
     this.glowMat = glowMaterial(null);
@@ -196,7 +129,6 @@ export class ClassicKit {
       this.banks.push(this.mirrorBank);
     }
     this.boxes = { dark: [], metal: [] };
-    this.statics = [];
   }
 
   /**
@@ -204,17 +136,19 @@ export class ClassicKit {
    * opts.mirror (default true when the kit mirrors): also add a reflected copy below y = 0.
    */
   line(a, b, width, { parent = null, mirror = true } = {}) {
-    const local = lineMatrix(a, b, width, new THREE.Matrix4());
+    const local = tubeMatrix(a, b, width, new THREE.Matrix4());
     let world = local;
     if (parent) {
       parent.updateMatrix();
       world = new THREE.Matrix4().multiplyMatrices(parent.matrix, local);
     }
     const core = this.bank.add(world);
-    let ml = null;
-    if (this.mirror && mirror) ml = this.mirrorBank.add(new THREE.Matrix4().multiplyMatrices(MIRROR_Y, world));
-    if (parent) this.followers.item(parent).lights.push({ local, core, mirror: ml });
-    return new GlowLight(core, ml, this.mirror ? this.mirror.k : 0);
+    if (parent) this.rig.bind(parent, this.bank, core.index, local);
+    if (!(this.mirror && mirror)) return new MultiLight([core]);
+    // reflected copy (dimmed) below the mirror floor
+    const ml = this.mirrorBank.add(new THREE.Matrix4().multiplyMatrices(MIRROR_Y, world));
+    if (parent) this.rig.bind(parent, this.mirrorBank, ml.index, local, MIRROR_Y);
+    return new MultiLight([core, ml], [1, this.mirror.k]);
   }
 
   /** Static dark box: Unity-style position / size / Euler degrees (converted to our frame). */
@@ -245,14 +179,11 @@ export class ClassicKit {
   rings({ count, y, z0, dz, bodyGeo = null, bodyMat = 'metal', lightSegs = [], rot0 = 0, rotStep = 0, mirrorLights = true }) {
     const objects = [];
     const lights = [];
-    let mesh = null;
+    let bodies = null;
     if (bodyGeo) {
       this.owned.push(bodyGeo);
-      mesh = new THREE.InstancedMesh(bodyGeo, this.mats[bodyMat], count);
-      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-      mesh.frustumCulled = false;
-      this.root.add(mesh);
-      this.statics.push(mesh);
+      bodies = new PropBank(this.root, bodyGeo, this.mats[bodyMat], count);
+      this.banks.push(bodies);
     }
     const ident = new THREE.Matrix4();
     for (let i = 0; i < count; i++) {
@@ -261,12 +192,8 @@ export class ClassicKit {
       g.rotation.z = (rot0 + rotStep * i) * DEG;
       this.root.add(g);
       objects.push(g);
-      const it = this.followers.item(g);
-      if (mesh) {
-        g.updateMatrix();
-        mesh.setMatrixAt(i, g.matrix);
-        it.bodies.push({ mesh, index: i, local: ident });
-      }
+      this.rig.track(g);
+      if (bodies) this.rig.attach(g, bodies, ident);
       lights.push(lightSegs.map(([a, b, w]) => this.line(a, b, w, { parent: g, mirror: mirrorLights })));
     }
     return { objects, lights };
@@ -290,12 +217,11 @@ export class ClassicKit {
       this.root.add(mesh);
       this.owned.push(mesh.geometry);
     }
-    this.followers.update(true);
-    const followers = this.followers;
+    this.rig.update(true);
+    const rig = this.rig;
     const banks = this.banks;
     const owned = this.owned;
     const mats = this.mats;
-    const statics = this.statics;
     return {
       root: this.root,
       banks,
@@ -303,15 +229,11 @@ export class ClassicKit {
       rings,
       lasers,
       update(t, dt) {
-        followers.update(false);
+        rig.update();
         if (update) update(t, dt);
       },
       dispose() {
         for (const b of banks) b.dispose();
-        for (const m of statics) {
-          m.removeFromParent();
-          m.dispose?.();
-        }
         for (const o of owned) o.dispose();
         Object.values(mats).forEach((m) => m.dispose());
         releaseGlowTexture();
@@ -401,6 +323,85 @@ export function floatingTrack(kit, { halfWidth = 3, z0 = 6, z1 = 300, stiltX = 2
     kit.box([s * (stiltX + 0.25), -50, z0 - 0.1], [0.2, 100, 0.2]);
     kit.box([s * stiltX, -2, (z0 + z1) / 2], [0.3, 0.4, z1 - z0], [0, 0, s * -22.5]);
   }
+}
+
+// ---- parts shared by The First / Triangle / Nice / Big Mirror (the same family of environments)
+
+/** Big diamond rings with 4 light bars each (ring lights, event 1). Ring-local light order per ring:
+ *  [upper-right, lower-left, lower-right, upper-left] (as the official IDs 1..4 of each ring). */
+export function bigRings(kit, { count = 15, y = 3, z0 = 12, dz = 14 } = {}) {
+  const body = squareFrame(56.5, 5, 1.4).rotateZ(45 * DEG);
+  const W = 2.2;
+  const segs = [
+    [new THREE.Vector3(42.6, 30.2, 0), new THREE.Vector3(30.2, 42.6, 0), W],
+    [new THREE.Vector3(-30.2, -42.6, 0), new THREE.Vector3(-42.6, -30.2, 0), W],
+    [new THREE.Vector3(42.6, -30.2, 0), new THREE.Vector3(30.2, -42.6, 0), W],
+    [new THREE.Vector3(-30.2, 42.6, 0), new THREE.Vector3(-42.6, 30.2, 0), W],
+  ];
+  return kit.rings({ count, y, z0, dz, bodyGeo: body, bodyMat: 'metal', lightSegs: segs });
+}
+
+/** Small diamond rings (no lights), event 8 spin / event 9 zoom. */
+export function smallRings(kit, { count = 30, y = 3, z0 = 21, dz = 5, rotStep = 5 } = {}) {
+  const body = squareFrame(10.5, 1.0, 0.8, { gapTopBottom: 6 }).rotateZ(-45 * DEG);
+  return kit.rings({ count, y, z0, dz, bodyGeo: body, bodyMat: 'dark', rotStep });
+}
+
+/** "^" logo at the end of the track: two bars (left, right), each its own light. */
+export function chevron(kit, { y = 5, z = 65, width = 0.9 } = {}) {
+  const c = U(0, y, z);
+  const l = kit.line(new THREE.Vector3(-0.02, 0.92, 0).add(c), new THREE.Vector3(-2.64, -0.92, 0).add(c), width);
+  const r = kit.line(new THREE.Vector3(0.02, 0.92, 0).add(c), new THREE.Vector3(2.64, -0.92, 0).add(c), width);
+  return [l, r];
+}
+
+/**
+ * Pairs of track lasers every dz from z0. The "left" beam starts at (emitX, y0, z) with direction dir
+ * (Unity-style axes, z = away from the player); the "right" beam is its mirror image (x negated).
+ * Returns lights in official order: [L1, R1, L2, R2, …] when leftFirst, else [R1, L1, …].
+ */
+export function trackLasers(kit, { n = 5, emitX, y0 = -2, z0 = 63.6, dz = 20, dir, len = 300, width = 1.0, leftFirst = true, mirror = true }) {
+  const out = [];
+  const d = new THREE.Vector3(dir[0], dir[1], dir[2]).normalize().multiplyScalar(len);
+  for (let i = 0; i < n; i++) {
+    const z = z0 + i * dz;
+    const pair = [];
+    for (const s of [1, -1]) {
+      // s = 1: the left beam as given, s = -1: its mirror (right)
+      const a = U(s * emitX, y0, z);
+      const b = U(s * (emitX + d.x), y0 + d.y, z + d.z);
+      pair.push(kit.line(a, b, width, { mirror }));
+    }
+    out.push(...(leftFirst ? pair : [pair[1], pair[0]]));
+  }
+  return out;
+}
+
+/**
+ * Rotating side lasers: per side `n` pivots at (±x, y, z0 + i dz) spinning around Y, each with one beam
+ * tilted `tilt` degrees from vertical toward the track centre. Returns { left: {pivots, lights}, right }.
+ */
+export function rotatingLasers(kit, { n = 4, x = 20, y = 3.5, z0 = 54, dz = 8, tilt = 60, up = 260, down = 60, width = 1.0, mirror = true }) {
+  const res = {};
+  for (const [name, s] of [['left', -1], ['right', 1]]) {
+    const pivots = [];
+    const lights = [];
+    const t = tilt * DEG;
+    const dx = -s * Math.sin(t);
+    const dy = Math.cos(t);
+    for (let i = 0; i < n; i++) {
+      const { pivot, lights: l } = kit.pivot(
+        U(s * x, y, z0 + i * dz),
+        [[new THREE.Vector3(-dx * down, -dy * down, 0), new THREE.Vector3(dx * up, dy * up, 0)]],
+        width,
+        { mirror },
+      );
+      pivots.push(pivot);
+      lights.push(l[0]);
+    }
+    res[name] = { pivots, lights };
+  }
+  return res;
 }
 
 export { DEG };

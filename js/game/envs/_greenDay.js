@@ -1,7 +1,6 @@
 // Shared builder for GreenDayEnvironment and GreenDayGrenadeEnvironment (our own recreation from
 // simple shapes, no game assets). See the two module files for the event-group tables.
-import { THREE, GEO, LightBank, trs, mergeStatic, sceneryMaterials, lightMaterial } from './kit.js';
-import { V, GlowBank, PropBank, MultiLight, Followers, mergeAll, beamGeometry, place, strokeText } from './_cKit.js';
+import { THREE, GEO, LightBank, trs, mergeStatic, sceneryMaterials, lightMaterial, V, GlowBank, PropBank, MultiLight, Rig, mergeAll, beamGeometry, place, strokeText, rng } from './kit.js';
 
 export const GREEN_DAY_COLORS = {
   left: '#42c805',
@@ -24,9 +23,9 @@ export function buildGreenDay({ rings: withRings }) {
   const greyMat = new THREE.MeshStandardMaterial({ color: 0x8d8f94, roughness: 0.8, metalness: 0.05 });
   const skinMat = new THREE.MeshStandardMaterial({ color: 0x15151a, roughness: 0.7, metalness: 0.2 });
   const owned = [bldgMat, greyMat, skinMat];
-  const follow = new Followers();
+  const rig = new Rig();
   const m = new THREE.Matrix4();
-  const glow = new GlowBank(root, GEO.tube, 200, { halo: 3, haloOpacity: 0.17 });
+  const glow = new GlowBank(root, GEO.tube, 200, { haloScale: 3, haloOpacity: 0.17 });
   const banks = [...glow.banks];
   const groups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
   const multi = (segs, r) => new MultiLight(segs.map(([a, b]) => glow.tube(a, b, r)));
@@ -78,7 +77,7 @@ export function buildGreenDay({ rings: withRings }) {
 
   // ---------------- city: buildings both sides, a bridge far ahead
   const city = [];
-  const rnd = mulberry(7);
+  const rnd = rng(7);
   for (const s of [-1, 1]) {
     let z = -2;
     while (z > -170) {
@@ -112,7 +111,7 @@ export function buildGreenDay({ rings: withRings }) {
       list.push(pivot);
       const target = V(s * (4 + i * 6), -2, 6);
       const dir = target.sub(pivot.position).normalize();
-      groups[type].push(glow.tubeFollow(follow, pivot, V(0, 0, 0), dir.multiplyScalar(150), 0.045));
+      groups[type].push(rig.tube(pivot, glow, V(0, 0, 0), dir.multiplyScalar(150), 0.045));
     }
   }
 
@@ -169,13 +168,11 @@ export function buildGreenDay({ rings: withRings }) {
       for (let e = 0; e < 4; e++) {
         const a = (e * Math.PI) / 2;
         trs([Math.cos(a) * half, Math.sin(a) * half, 0], [0, 0, a], [0.5, half * 2 + 0.5, 0.5], m);
-        follow.add(props, props.add(m), ring, m);
+        rig.attach(ring, props, m);
       }
       for (const sy of [1, -1]) {
         trs([0, sy * (half - 0.45), 0.3], [0, 0, 0], [2.4, 0.32, 0.4], m);
-        const light = bars.add(m);
-        follow.add(bars, bars.mesh.count - 1, ring, m);
-        groups[1].push(light);
+        groups[1].push(rig.light(ring, bars, m));
       }
     }
   } else {
@@ -208,7 +205,7 @@ export function buildGreenDay({ rings: withRings }) {
   root.add(floor, darkMesh, greyMesh, cityMesh);
   box.dispose();
 
-  follow.update(true);
+  rig.update(true);
   return {
     root,
     banks,
@@ -216,7 +213,7 @@ export function buildGreenDay({ rings: withRings }) {
     rings: withRings ? [{ type: 'big', objects: ringObjs, step: 6, zoom: { near: 2.5, far: RING_DZ } }] : [],
     lasers,
     update() {
-      follow.update();
+      rig.update();
     },
     dispose() {
       for (const b of banks) b.dispose();
@@ -224,15 +221,5 @@ export function buildGreenDay({ rings: withRings }) {
       for (const o of owned) o.dispose();
       Object.values(mats).forEach((x) => x.dispose());
     },
-  };
-}
-
-function mulberry(a) {
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }

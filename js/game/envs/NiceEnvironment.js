@@ -19,8 +19,7 @@
 // Lasers 12 / 13: the two 4-line fans spin around the vertical through their hub.
 // Default colours: Nice uses Beat Saber's "The First" scheme (BSMG wiki, Default Environment Colors).
 import { THREE } from './kit.js';
-import { ClassicKit, U, DEG, towerBlocks } from './_classicShared.js';
-import { bigRings, smallRings, chevron, trackLasers } from './_classicParts.js';
+import { ClassicKit, U, DEG, towerBlocks, bigRings, smallRings, chevron, trackLasers } from './_classic.js';
 
 export default {
   name: 'NiceEnvironment',

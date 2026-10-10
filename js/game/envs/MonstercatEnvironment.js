@@ -1,8 +1,8 @@
 // Monstercat (MonstercatEnvironment) — recreation with simple shapes, made for this project.
-// Layout, light groups, light-ID order and sources: see ./_bxMonstercat.js (shared with Crab Rave).
+// Layout, light groups, light-ID order and sources: see ./_monstercat.js (shared with Crab Rave).
 //   0 bottom lasers 8 · 1 top lasers 7 · 2 left lasers 5 · 3 right lasers 5 · 4 center lights 14
 //   rings: 20 small ring frames (spin only) · lasers: 12 / 13
-import { buildMonstercat } from './_bxMonstercat.js';
+import { buildMonstercat } from './_monstercat.js';
 
 export default {
   name: 'MonstercatEnvironment',

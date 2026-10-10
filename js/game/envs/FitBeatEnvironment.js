@@ -15,8 +15,7 @@
 //   4  chevron        2  1 = left arm, 2 = right arm
 // rings: small × 15 (spin + zoom), big × 15 (spin). lasers: 8 + 8 (tilted beams spinning around Y).
 // (In the game the back-top ring lasers show the opposite colour; the runtime decides colours, so not reproduced.)
-import { THREE, GEO, trs, mergeStatic, sceneryMaterials } from './kit.js';
-import { V, GlowBank, PropBank, Followers } from './_cKit.js';
+import { THREE, GEO, trs, mergeStatic, sceneryMaterials, V, GlowBank, PropBank, Rig } from './kit.js';
 
 const SMALL_N = 15;
 const SMALL_Z0 = -17;
@@ -47,16 +46,16 @@ export default {
     root.name = 'FitBeatEnvironment';
     const mats = sceneryMaterials();
     const frameMat = new THREE.MeshStandardMaterial({ color: 0x24222e, roughness: 0.5, metalness: 0.6 });
-    const follow = new Followers();
+    const rig = new Rig();
     const m = new THREE.Matrix4();
 
     // one glow bank (core + halo) for every light = 2 draw calls
-    const glow = new GlowBank(root, GEO.tube, 160, { halo: 3.2, haloOpacity: 0.16 });
+    const glow = new GlowBank(root, GEO.tube, 160, { haloScale: 3.2, haloOpacity: 0.16 });
     // ring frames (instanced boxes that follow the ring pivots) = 1 draw call
     const frames = new PropBank(root, GEO.box, frameMat, 4 * (SMALL_N + BIG_N) + 8);
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
 
-    const addFollowedTube = (pivots, a, b, r, list) => list.push(glow.tubeFollow(follow, pivots, a, b, r));
+    const addFollowedTube = (pivots, a, b, r, list) => list.push(rig.tube(pivots, glow, a, b, r));
     const addFrame = (pivot, half, thick, rot = 0) => {
       // a square frame of 4 boxes in the pivot's XY plane (rotated by rot around Z)
       for (let s = 0; s < 4; s++) {
@@ -64,7 +63,7 @@ export default {
         const cx = Math.cos(a) * half;
         const cy = Math.sin(a) * half;
         trs([cx, cy, 0], [0, 0, a], [thick, half * 2 + thick, thick], m);
-        follow.add(frames, frames.add(m), pivot, m);
+        rig.attach(pivot, frames, m);
       }
     };
 
@@ -114,7 +113,7 @@ export default {
         pivot.userData.axis = 'y'; // tilted beam spinning around Y sweeps a cone, always upward
         root.add(pivot);
         list.push(pivot);
-        groups[type].push(glow.tubeFollow(follow, pivot, V(0, 0, 0), V(-side * 90 * Math.sin(0.45), 90 * Math.cos(0.45), 0), 0.05));
+        groups[type].push(rig.tube(pivot, glow, V(0, 0, 0), V(-side * 90 * Math.sin(0.45), 90 * Math.cos(0.45), 0), 0.05));
       }
     }
 
@@ -144,7 +143,7 @@ export default {
     const scenery = mergeStatic(parts, mats.dark);
     root.add(scenery);
 
-    follow.update(true);
+    rig.update(true);
     const banks = [...glow.banks, frames];
     return {
       root,
@@ -156,7 +155,7 @@ export default {
       ],
       lasers,
       update() {
-        follow.update();
+        rig.update();
       },
       dispose() {
         glow.dispose();

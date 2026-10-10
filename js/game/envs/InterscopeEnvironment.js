@@ -16,8 +16,7 @@
 // assignment, the in-gate order and rough positions: ChroMapper's community recreation (facts
 // only). Laser placement/motion: approximate. Car hydraulics (events 8 / 16 / 17) are not
 // modelled (no contract hook); cars are static.
-import { THREE } from './kit.js';
-import { LightSet, Rig, MultiLight, barXYZ, wash, stdMat, mergeGeos } from './_dKit.js';
+import { THREE, GEO, GlowBank, Rig, MultiLight, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const GATE_Z = [-7.9, -17.9, -27.9, -37.9, -47.9];
 // which gate (index into GATE_Z) each event type lights
@@ -154,7 +153,7 @@ export default {
     owned.push(carMesh.geometry);
 
     // ---- lights -----------------------------------------------------------------------------
-    const lights = new LightSet(root, { max: 64, glowOpacity: 0.22 });
+    const lights = new GlowBank(root, GEO.box, 64, { haloOpacity: 0.22 });
     const rig = new Rig(root);
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [], 6: [], 7: [] };
     const gateLights = GATE_Z.map((z) => {

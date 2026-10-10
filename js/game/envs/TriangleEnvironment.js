@@ -16,8 +16,7 @@
 // event 9 zoom 5 ↔ 10 m).
 // Lasers 12 / 13: the 7 + 7 rotating lasers (cone sweep around the vertical).
 // Default colours: Triangle uses Beat Saber's "The First" scheme (BSMG wiki, Default Environment Colors).
-import { ClassicKit, U, DEG, towerBlocks, floatingTrack, polyFrame } from './_classicShared.js';
-import { bigRings, trackLasers, rotatingLasers } from './_classicParts.js';
+import { ClassicKit, U, DEG, towerBlocks, floatingTrack, polyFrame, bigRings, trackLasers, rotatingLasers } from './_classic.js';
 
 export default {
   name: 'TriangleEnvironment',
