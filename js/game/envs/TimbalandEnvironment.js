@@ -48,7 +48,7 @@ export default {
     const m = new THREE.Matrix4();
 
     const glow = new GlowBank(root, GEO.tube, 120, { haloScale: 3, haloOpacity: 0.17 });
-    const ringProps = new PropBank(root, GEO.box, trussMat, RING_N * 3);
+    const ringProps = new PropBank(root, GEO.box, trussMat, RING_N * 3, { ownMaterial: true });
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [] };
     const lasers = { left: [], right: [] };
 

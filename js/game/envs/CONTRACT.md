@@ -95,7 +95,9 @@ but build everything else (floor, towers, lasers, rings, logo shapes …).
 - `Rig`: bank instances that follow moving pivots (rings, laser pivots) without one draw call per
   object: `rig.track(obj)`, `rig.proxy(x, y, z, …)`, `rig.light(pivot, bank, local)`,
   `rig.attach(pivot, propBank, local)`, `rig.tube(pivot, glowBank, a, b, r)`; call `rig.update()`
-  from the module's `update()`. `PropBank`: instanced non-light scenery that can move.
+  from the module's `update()`. `PropBank`: instanced non-light scenery that can move (pass
+  `{ ownMaterial: true }` when its material is also used by ordinary meshes — a material shared by
+  instanced and non-instanced meshes makes three.js re-check the shader every frame).
 - `lightMaterial()` (additive: black = invisible) for glowing tubes / panels; `softLightMaterial()`
   with vertex colours (`glowDiscGeometry`, `fadeStripGeometry`); `SoftGlow` haze.
 - Static, non-light scenery: merge per material with `mergeStatic()` / `mergeGeos()`; materials from

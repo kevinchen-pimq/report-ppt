@@ -347,10 +347,15 @@ export function wash(sources, apply) {
 // ---------------------------------------------------------------------------------------------
 // Moving instances
 
-/** Instanced, non-light scenery whose instances can move (ring frames …): 1 draw call. */
+/**
+ * Instanced, non-light scenery whose instances can move (ring frames …): 1 draw call.
+ * ownMaterial: draw with a private copy of `material` — use it when the same material is also on
+ * ordinary (non-instanced) meshes, otherwise three.js re-checks the shader program every frame.
+ */
 export class PropBank {
-  constructor(parent, geometry, material, max) {
-    this.mesh = new THREE.InstancedMesh(geometry, material, max);
+  constructor(parent, geometry, material, max, { ownMaterial = false } = {}) {
+    this.ownMaterial = ownMaterial ? material.clone() : null;
+    this.mesh = new THREE.InstancedMesh(geometry, this.ownMaterial || material, max);
     this.mesh.count = 0;
     this.mesh.frustumCulled = false;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -381,6 +386,7 @@ export class PropBank {
   dispose() {
     this.mesh.removeFromParent();
     this.mesh.dispose?.();
+    this.ownMaterial?.dispose();
   }
 }
 

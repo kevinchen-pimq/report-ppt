@@ -174,7 +174,7 @@ export default {
     const banks = [];
     const coilGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
     owned.push(coilGeo);
-    const coilBodies = new PropBank(root, coilGeo, metalMat, 6);
+    const coilBodies = new PropBank(root, coilGeo, metalMat, 6, { ownMaterial: true });
     banks.push(coilBodies);
     const coils = [];
 

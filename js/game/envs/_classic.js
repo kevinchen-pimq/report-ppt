@@ -182,7 +182,7 @@ export class ClassicKit {
     let bodies = null;
     if (bodyGeo) {
       this.owned.push(bodyGeo);
-      bodies = new PropBank(this.root, bodyGeo, this.mats[bodyMat], count);
+      bodies = new PropBank(this.root, bodyGeo, this.mats[bodyMat], count, { ownMaterial: true });
       this.banks.push(bodies);
     }
     const ident = new THREE.Matrix4();

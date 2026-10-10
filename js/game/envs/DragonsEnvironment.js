@@ -93,7 +93,7 @@ export default {
     for (const s of [-1, 1]) groups[0].push(tubes.tube(V(s * 18.5, -6, 30), V(s * 18.5, -6, -260), 0.12, 4));
 
     // ---------- big rings (diamonds) ----------
-    const ringBodies = new PropBank(root, GEO.box, mats.metal, BIG_RINGS * 4);
+    const ringBodies = new PropBank(root, GEO.box, mats.metal, BIG_RINGS * 4, { ownMaterial: true });
     const R = 44; // half-diagonal of the diamond
     const bigRings = [];
     const edge = R * Math.SQRT2;

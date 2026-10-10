@@ -159,7 +159,7 @@ export function buildGreenDay({ rings: withRings }) {
   if (withRings) {
     // rings: square frames down the far runway, a solid light bar at top and bottom of each
     const frameMat = skinMat;
-    const props = new PropBank(root, GEO.box, frameMat, RING_N * 4);
+    const props = new PropBank(root, GEO.box, frameMat, RING_N * 4, { ownMaterial: true });
     const bars = new LightBank(root, GEO.box, RING_N * 6);
     banks.push(props, bars);
     const half = 6;
