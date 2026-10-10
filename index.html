@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>WebXR Saber</title>
   <meta name="description" content="在瀏覽器中遊玩 Beat Saber 譜面的 WebXR 節奏遊戲" />
+  <meta name="theme-color" content="#07081a" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect x=%224%22 y=%224%22 width=%2224%22 height=%2224%22 rx=%225%22 fill=%22%23c81e1e%22/%3E%3Cpath d=%22M9 12h14l-7 9z%22 fill=%22white%22/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/style.css" />
   <script type="importmap">
     {
@@ -21,195 +25,342 @@
   <div id="scene"></div>
 
   <main id="menu">
-    <header class="top">
-      <h1><span class="red">Web</span><span class="blue">XR</span> Saber</h1>
-      <p class="tag">讀取 Beat Saber 譜面（.zip / 資料夾 / BeatSaver），在 VR 中實際遊玩</p>
+    <!-- Top bar: logo, main tabs, VR button -->
+    <header class="topbar">
+      <div class="topbar-in">
+        <a class="arcade-link" href="https://xr-arcade.pages.dev/" title="回到 XR Arcade（更多 VR 遊戲）">‹ XR Arcade</a>
+        <h1 class="logo"><span class="red">Web</span><span class="blue">XR</span> <span class="white">Saber</span></h1>
+        <nav class="tabs" role="tablist" aria-label="主選單">
+          <button class="tab active" type="button" role="tab" data-tab="find" aria-selected="true">找歌</button>
+          <button class="tab" type="button" role="tab" data-tab="song" aria-selected="false">歌曲<span id="tab-song-dot" class="tab-dot" hidden></span></button>
+          <button class="tab" type="button" role="tab" data-tab="settings" aria-selected="false">設定</button>
+        </nav>
+        <div class="top-actions">
+          <button id="dl-badge" class="dl-badge" type="button" hidden title="下載中的歌曲">下載中 <span id="dl-count">0</span></button>
+          <div class="vr-box">
+            <button id="vr-menu" class="btn vr-btn" type="button" disabled title="在 VR 裡選歌、調整設定與校正">進入 VR</button>
+            <span id="vr-status" class="vr-status">偵測 VR 中…</span>
+          </div>
+        </div>
+      </div>
     </header>
 
-    <div class="grid">
-      <section class="card" id="load-card">
-        <h2>1. 載入譜面</h2>
-        <label id="drop" class="drop">
-          <input id="file-zip" type="file" accept=".zip,application/zip" hidden />
-          <strong>拖放譜面 .zip 到這裡</strong>
-          <span>或點擊選擇檔案</span>
-        </label>
-        <div class="row">
-          <label class="btn ghost small">
-            <input id="file-folder" type="file" webkitdirectory multiple hidden />
-            選擇譜面資料夾
-          </label>
+    <div class="page">
+      <!-- ============================== 找歌 ============================== -->
+      <section id="tab-find" class="tab-panel" role="tabpanel">
+        <div class="intro">
+          <ol class="steps">
+            <li><b>找一首歌</b><span>點封面可以先試聽</span></li>
+            <li><b>選難度</b><span>在「歌曲」頁</span></li>
+            <li><b>開始玩</b><span>VR 或電腦試玩</span></li>
+          </ol>
+          <p class="intro-alt">戴著 VR 頭盔？直接按右上角 <b>「進入 VR」</b>，在 VR 裡選歌也可以。</p>
         </div>
 
-        <h3>BeatSaver</h3>
-        <form id="id-form" class="row">
-          <input id="bsr" type="text" placeholder="輸入 BeatSaver ID（例如 25f）" autocomplete="off" />
-          <button class="btn small" type="submit">載入</button>
-        </form>
-        <form id="search-form" class="row">
-          <input id="search" type="search" placeholder="搜尋歌曲 / 譜師…" autocomplete="off" />
-          <button class="btn small" type="submit">搜尋</button>
-        </form>
-        <div class="row chips">
-          <button class="chip" data-sort="Rating" type="button">高評分</button>
-          <button class="chip" data-sort="Latest" type="button">最新</button>
-          <button class="chip" data-sort="Curated" type="button">精選</button>
-        </div>
-        <ul id="results" class="results"></ul>
+        <nav class="subnav" data-group="find" aria-label="找歌方式">
+          <button class="sub active" type="button" data-sub="search">搜尋 BeatSaver</button>
+          <button class="sub" type="button" data-sub="library">我的歌曲 <span id="library-count" class="count"></span></button>
+          <button class="sub" type="button" data-sub="playlists">歌單 <span id="pl-count" class="count"></span></button>
+          <button class="sub" type="button" data-sub="upload">上傳檔案</button>
+        </nav>
 
-        <h3>歌單 <span id="pl-info" class="lib-info"></span></h3>
-        <p class="muted small-text lib-note">上傳 Beat Saber 的 .bplist 歌單檔，或匯入 BeatSaver 上的歌單。歌曲在點選時才下載，也可以「全部下載」。</p>
-        <div class="row">
-          <label class="btn ghost small">
-            <input id="file-bplist" type="file" accept=".bplist,.json,application/json" multiple hidden />
-            上傳 .bplist
-          </label>
-          <form id="pl-id-form" class="row inline">
-            <input id="pl-id" type="text" placeholder="BeatSaver 歌單 ID 或網址" autocomplete="off" />
-            <button class="btn small" type="submit">匯入</button>
-          </form>
-        </div>
-        <form id="pl-search-form" class="row">
-          <input id="pl-search" type="search" placeholder="搜尋 BeatSaver 歌單（留空 = 熱門）" autocomplete="off" />
-          <button class="btn small" type="submit">搜尋歌單</button>
-        </form>
-        <ul id="pl-results" class="results small" hidden></ul>
-        <ul id="playlists" class="results small"><li class="muted">尚無歌單</li></ul>
-        <div id="pl-detail" class="pl-detail" hidden>
-          <div class="pl-head">
-            <img id="pl-cover" alt="" />
-            <div>
-              <div id="pl-title" class="r-title"></div>
-              <div id="pl-meta" class="r-meta"></div>
+        <!-- Download manager (filled in later; hidden until there is something to show) -->
+        <section id="downloads" class="card downloads" hidden>
+          <div class="card-head">
+            <h2>下載中</h2>
+          </div>
+          <ul id="downloads-list" class="dl-list"></ul>
+        </section>
+
+        <!-- BeatSaver search -->
+        <div id="sub-search" class="sub-panel" data-group="find">
+          <div class="card">
+            <form id="search-form" class="search-row">
+              <input id="search" type="search" placeholder="搜尋歌名、歌手或譜師…" autocomplete="off" aria-label="搜尋歌曲" />
+              <button class="btn primary" type="submit">搜尋</button>
+            </form>
+            <div class="filter-row">
+              <div class="chips" role="group" aria-label="排序">
+                <button class="chip" data-sort="Rating" type="button">高評分</button>
+                <button class="chip" data-sort="Latest" type="button">最新</button>
+                <button class="chip" data-sort="Curated" type="button">精選</button>
+              </div>
+              <form id="id-form" class="id-form">
+                <input id="bsr" type="text" placeholder="BeatSaver ID（例如 25f）" autocomplete="off" aria-label="BeatSaver ID" />
+                <button class="btn" type="submit">載入</button>
+              </form>
             </div>
-            <button id="pl-all" class="btn small" type="button">全部下載</button>
-            <button id="pl-back" class="btn ghost small" type="button">返回</button>
+            <p class="hint">點<b>封面</b>試聽；點歌曲的其他地方會下載並選好這首歌。</p>
           </div>
-          <ul id="pl-songs" class="results"></ul>
+          <ul id="results" class="results"></ul>
         </div>
-        <h3>已存的歌曲 <span id="library-info" class="lib-info"></span></h3>
-        <p class="muted small-text lib-note">下載或載入的歌會存在這個瀏覽器裡，重新整理後仍在（上限 1 GB，滿了會刪最久沒玩的）。
-          <button id="lib-clear" class="btn ghost tiny" type="button" hidden>清除全部</button></p>
-        <ul id="library" class="results small"><li class="muted">尚無</li></ul>
-      </section>
 
-      <section class="card" id="song-card">
-        <h2>2. 選擇難度</h2>
-        <div id="song-empty" class="empty">尚未載入譜面</div>
-        <div id="song" hidden>
-          <div class="song-head">
-            <img id="cover" alt="" />
-            <div>
-              <div id="song-title" class="song-title"></div>
-              <div id="song-sub" class="muted"></div>
-              <div id="song-artist"></div>
-              <div id="song-meta" class="muted small-text"></div>
-              <button id="preview-btn" class="btn small preview-btn" type="button">▶ 試聽</button>
+        <!-- Saved songs -->
+        <div id="sub-library" class="sub-panel" data-group="find" hidden>
+          <div class="card">
+            <div class="card-head">
+              <h2>我的歌曲 <span id="library-info" class="lib-info"></span></h2>
+              <button id="lib-clear" class="btn ghost small danger" type="button" hidden>清除全部</button>
+            </div>
+            <p class="hint">下載或上傳過的歌會存在這個瀏覽器裡，重新整理後還在（上限 1 GB，滿了會刪掉最久沒玩的）。</p>
+          </div>
+          <ul id="library" class="results"><li class="muted">尚無</li></ul>
+        </div>
+
+        <!-- Playlists -->
+        <div id="sub-playlists" class="sub-panel" data-group="find" hidden>
+          <div class="card">
+            <div class="card-head">
+              <h2>歌單 <span id="pl-info" class="lib-info"></span></h2>
+            </div>
+            <p class="hint">上傳 Beat Saber 的 .bplist 歌單檔，或匯入 BeatSaver 上的歌單。歌曲點了才下載，也可以「全部下載」。</p>
+            <div class="pl-actions">
+              <label class="btn">
+                <input id="file-bplist" type="file" accept=".bplist,.json,application/json" multiple hidden />
+                上傳 .bplist
+              </label>
+              <form id="pl-id-form" class="id-form grow">
+                <input id="pl-id" type="text" placeholder="BeatSaver 歌單 ID 或網址" autocomplete="off" aria-label="BeatSaver 歌單 ID 或網址" />
+                <button class="btn" type="submit">匯入</button>
+              </form>
+            </div>
+            <form id="pl-search-form" class="search-row">
+              <input id="pl-search" type="search" placeholder="搜尋 BeatSaver 歌單（留空 = 熱門）" autocomplete="off" aria-label="搜尋歌單" />
+              <button class="btn" type="submit">搜尋歌單</button>
+            </form>
+          </div>
+          <ul id="pl-results" class="results" hidden></ul>
+          <h3 id="pl-list-title" class="list-title">我的歌單</h3>
+          <ul id="playlists" class="results"><li class="muted">尚無歌單</li></ul>
+          <div id="pl-detail" class="pl-detail" hidden>
+            <div class="card pl-head">
+              <button id="pl-back" class="btn ghost back" type="button">‹ 返回</button>
+              <img id="pl-cover" alt="" />
+              <div class="pl-text">
+                <div id="pl-title" class="r-title"></div>
+                <div id="pl-meta" class="r-meta"></div>
+              </div>
+              <button id="pl-all" class="btn primary" type="button">全部下載</button>
+            </div>
+            <ul id="pl-songs" class="results"></ul>
+          </div>
+        </div>
+
+        <!-- Upload files -->
+        <div id="sub-upload" class="sub-panel" data-group="find" hidden>
+          <div class="card">
+            <label id="drop" class="drop">
+              <input id="file-zip" type="file" accept=".zip,application/zip" hidden />
+              <span class="drop-icon" aria-hidden="true">⇪</span>
+              <strong>拖放譜面 .zip 到這裡</strong>
+              <span>或點這裡選擇檔案</span>
+            </label>
+            <div class="upload-row">
+              <label class="btn">
+                <input id="file-folder" type="file" webkitdirectory multiple hidden />
+                選擇譜面資料夾
+              </label>
+              <span class="hint">已解壓縮的譜面資料夾（含 Info.dat）也可以。.bplist 歌單檔可以直接拖到網頁上。</span>
             </div>
           </div>
-          <div id="chars" class="row chips"></div>
-          <div id="diffs" class="diffs"></div>
-          <div id="diff-stats" class="muted small-text"></div>
-          <div class="play-row">
-            <button id="play-vr" class="btn big vr" disabled>▶ 進入 VR 遊玩</button>
-            <button id="play-desktop" class="btn big" disabled>▶ 桌面預覽</button>
-          </div>
         </div>
-        <button id="vr-menu" class="btn vr-menu" disabled>進入 VR 選單（在 VR 中選歌 / 設定 / 校正）</button>
-        <div id="vr-note" class="muted small-text"></div>
       </section>
 
-      <section class="card" id="settings-card">
-        <h2>設定</h2>
-        <label class="check"><input type="checkbox" id="opt-noFail" /> 不會失敗 (No Fail)</label>
-        <label class="check"><input type="checkbox" id="opt-autoplay" /> 自動遊玩（觀賞模式）</label>
-        <label class="check"><input type="checkbox" id="opt-useMapColors" /> 使用譜面自訂顏色</label>
-        <label class="range">身高 <output id="out-playerHeight"></output>
-          <input type="range" id="opt-playerHeight" min="1.2" max="2.3" step="0.01" /></label>
-        <label class="range">音訊延遲 <output id="out-audioLatencyMs"></output>
-          <input type="range" id="opt-audioLatencyMs" min="-200" max="400" step="5" /></label>
-        <div class="calib">
-          <div class="row">
-            <button id="cal-start" class="btn small" type="button">開始節拍測試</button>
-            <button id="cal-tap" class="btn small tap" type="button" disabled>敲擊（或按空白鍵）</button>
-            <button id="cal-apply" class="btn small" type="button" disabled>套用</button>
+      <!-- ============================== 歌曲 ============================== -->
+      <section id="tab-song" class="tab-panel" role="tabpanel" hidden>
+        <section id="last-result" class="card result" hidden></section>
+        <section class="card song-card" id="song-card">
+          <div id="song-empty" class="empty">
+            <p>還沒有選歌</p>
+            <button class="btn primary" type="button" data-goto="find">去找歌</button>
           </div>
-          <div id="cal-info" class="muted small-text">聽到「嗒」聲時敲擊，測出耳機 / 喇叭的額外延遲。正值 = 聲音比畫面晚。</div>
-        </div>
-        <label class="range">音樂音量 <output id="out-volume"></output>
-          <input type="range" id="opt-volume" min="0" max="1" step="0.05" /></label>
-        <label class="range">打擊音效 <output id="out-sfxVolume"></output>
-          <input type="range" id="opt-sfxVolume" min="0" max="1" step="0.05" /></label>
-        <label class="range">光劍角度 <output id="out-saberAngle"></output>
-          <input type="range" id="opt-saberAngle" min="-60" max="60" step="5" /></label>
-        <label class="select">VR 時電腦螢幕顯示
-          <select id="opt-spectator">
-            <option value="third">第三人稱視角</option>
-            <option value="first">第一人稱（平滑）</option>
-            <option value="off">關閉（一體機建議）</option>
-          </select></label>
-        <div class="row colors">
-          <label>左劍 <input type="color" id="opt-leftColor" /></label>
-          <label>右劍 <input type="color" id="opt-rightColor" /></label>
-        </div>
-        <h3>外觀</h3>
-        <label class="select">光劍模型
-          <select id="opt-saberModel">
-            <option value="classic">經典</option>
-            <option value="neon">霓虹</option>
-            <option value="katana">武士刀</option>
-            <option value="crystal">水晶</option>
-            <option value="custom">自訂模型（.glb）</option>
-          </select></label>
-        <div class="row model-row">
-          <label class="btn ghost small">上傳光劍 .glb<input id="up-saber" type="file" accept=".glb,.gltf,model/gltf-binary" hidden /></label>
-          <span id="name-saber" class="muted small-text">未上傳</span>
-          <button id="rm-saber" class="btn ghost small" type="button" hidden>移除</button>
-        </div>
-        <label class="check"><input type="checkbox" id="opt-saberFlip" /> 反轉自訂光劍方向（劍柄 / 劍尖顛倒時使用）</label>
-        <label class="select">方塊模型
-          <select id="opt-noteModel">
-            <option value="classic">經典圓角</option>
-            <option value="mech">機械方塊</option>
-            <option value="neon">霓虹框</option>
-            <option value="outline">外框</option>
-            <option value="custom">自訂模型（.glb）</option>
-          </select></label>
-        <div class="row model-row">
-          <label class="btn ghost small">上傳方塊 .glb<input id="up-note" type="file" accept=".glb,.gltf,model/gltf-binary" hidden /></label>
-          <span id="name-note" class="muted small-text">未上傳</span>
-          <button id="rm-note" class="btn ghost small" type="button" hidden>移除</button>
-        </div>
-        <label class="select">牆壁
-          <select id="opt-wallStyle">
-            <option value="translucent">半透明</option>
-            <option value="edges">只顯示邊框</option>
-          </select></label>
-        <p class="muted small-text">自訂模型使用 glTF 2.0（.glb，需內嵌貼圖）。光劍：最長的軸當作劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。方塊：正面朝 +Z，自動縮放置中並套用方塊顏色（名稱含 arrow / white / metal 的材質保持原色）。</p>
-        <details class="help">
-          <summary>操作說明</summary>
-          <ul>
-            <li><b>VR</b>：左手紅劍、右手藍劍。依箭頭方向揮砍方塊，圓點方塊任意方向皆可。</li>
-            <li>躲開炸彈與紅色牆壁（頭部進入牆壁會扣血）。</li>
-            <li>VR 中用控制器的雷射指向按鈕、扣扳機點選；搖桿上下可捲動清單。B / Y：暫停 / 返回，A / X（暫停中）：重新開始。</li>
-            <li>VR 選單可直接搜尋下載 BeatSaver 譜面、調整設定、測量身高與校正音訊延遲。</li>
-            <li><b>觀戰畫面</b>：用 PC VR 遊玩時，電腦螢幕會顯示第三人稱視角，按 V 或畫面上方按鈕切換。</li>
-            <li><b>桌面預覽</b>：滑鼠揮動藍劍，按住左鍵改控制紅劍；A/D 左右閃避、S 蹲下；空白鍵暫停。</li>
-          </ul>
-        </details>
+          <div id="song" hidden>
+            <div class="song-head">
+              <button id="preview-btn" class="cover pv-btn big-cover" type="button" title="試聽">
+                <img id="cover" alt="" />
+                <span class="pv-ico" aria-hidden="true"></span>
+              </button>
+              <div class="song-info">
+                <div id="song-title" class="song-title"></div>
+                <div id="song-sub" class="muted"></div>
+                <div id="song-artist" class="song-artist"></div>
+                <div id="song-meta" class="muted small-text"></div>
+                <p class="hint">點封面試聽 / 暫停</p>
+              </div>
+            </div>
+            <h3 class="field-title">模式</h3>
+            <div id="chars" class="chips"></div>
+            <h3 class="field-title">難度</h3>
+            <div id="diffs" class="diffs"></div>
+            <div id="diff-stats" class="muted small-text stats-line"></div>
+            <div class="play-row">
+              <button id="play-vr" class="btn big vr" type="button" disabled>▶ 在 VR 中遊玩</button>
+              <button id="play-desktop" class="btn big" type="button" disabled>▶ 電腦試玩</button>
+            </div>
+          </div>
+          <div id="vr-note" class="muted small-text vr-note"></div>
+        </section>
       </section>
+
+      <!-- ============================== 設定 ============================== -->
+      <section id="tab-settings" class="tab-panel" role="tabpanel" hidden>
+        <nav class="subnav" data-group="settings" aria-label="設定分類">
+          <button class="sub active" type="button" data-sub="game">遊戲</button>
+          <button class="sub" type="button" data-sub="calib">校正</button>
+          <button class="sub" type="button" data-sub="look">外觀</button>
+          <button class="sub" type="button" data-sub="help">操作說明</button>
+        </nav>
+        <p class="hint settings-note">設定會自動儲存，VR 裡的設定選單也會同步。</p>
+
+        <div id="sub-game" class="sub-panel settings-grid" data-group="settings">
+          <div class="card">
+            <h2>遊戲規則</h2>
+            <label class="switch"><input type="checkbox" id="opt-noFail" /><span>不會失敗<small>血量歸零也能玩完整首歌</small></span></label>
+            <label class="switch"><input type="checkbox" id="opt-autoplay" /><span>自動遊玩<small>觀賞模式，電腦幫你切</small></span></label>
+            <label class="switch"><input type="checkbox" id="opt-showWalls" /><span>顯示牆壁</span></label>
+            <label class="switch"><input type="checkbox" id="opt-showBombs" /><span>顯示炸彈</span></label>
+            <label class="switch"><input type="checkbox" id="opt-showDebris" /><span>顯示切開的方塊<small>關閉後切到的方塊會直接消失</small></span></label>
+            <label class="switch"><input type="checkbox" id="opt-useMapColors" /><span>使用譜面自訂顏色</span></label>
+          </div>
+          <div class="card">
+            <h2>聲音與畫面</h2>
+            <label class="range">音樂音量 <output id="out-volume"></output>
+              <input type="range" id="opt-volume" min="0" max="1" step="0.05" /></label>
+            <label class="range">打擊音效 <output id="out-sfxVolume"></output>
+              <input type="range" id="opt-sfxVolume" min="0" max="1" step="0.05" /></label>
+            <label class="range">光劍角度 <output id="out-saberAngle"></output>
+              <input type="range" id="opt-saberAngle" min="-60" max="60" step="5" /></label>
+            <label class="select">VR 時電腦螢幕顯示
+              <select id="opt-spectator">
+                <option value="third">第三人稱視角</option>
+                <option value="first">第一人稱（平滑）</option>
+                <option value="off">關閉（一體機建議）</option>
+              </select></label>
+          </div>
+        </div>
+
+        <div id="sub-calib" class="sub-panel settings-grid" data-group="settings" hidden>
+          <div class="card">
+            <h2>身高</h2>
+            <p class="hint">方塊和牆壁的高度會跟著身高調整。在 VR 裡的「校正」頁可以自動測量。</p>
+            <label class="range">身高 <output id="out-playerHeight"></output>
+              <input type="range" id="opt-playerHeight" min="1.2" max="2.3" step="0.01" /></label>
+            <button id="height-reset" class="btn ghost small" type="button">恢復預設 1.80 m</button>
+          </div>
+          <div class="card">
+            <h2>音訊延遲</h2>
+            <p class="hint">如果聲音和方塊對不上（例如用藍牙耳機），用這個測試找出延遲。</p>
+            <label class="range">音訊延遲 <output id="out-audioLatencyMs"></output>
+              <input type="range" id="opt-audioLatencyMs" min="-200" max="400" step="5" /></label>
+            <div class="calib">
+              <ol class="calib-steps">
+                <li>按「開始節拍測試」</li>
+                <li>每次聽到「嗒」就按「敲擊」（或空白鍵），至少 6 次</li>
+                <li>按「套用」</li>
+              </ol>
+              <div class="calib-row">
+                <button id="cal-start" class="btn" type="button">開始節拍測試</button>
+                <button id="cal-tap" class="btn tap" type="button" disabled>敲擊（或按空白鍵）</button>
+                <button id="cal-apply" class="btn primary" type="button" disabled>套用</button>
+              </div>
+              <div id="cal-info" class="muted small-text">聽到「嗒」聲時敲擊，測出耳機 / 喇叭的額外延遲。正值 = 聲音比畫面晚。</div>
+            </div>
+          </div>
+        </div>
+
+        <div id="sub-look" class="sub-panel look-grid" data-group="settings" hidden>
+          <div class="card preview-card">
+            <h2>預覽</h2>
+            <div class="preview-wrap">
+              <canvas id="style-preview" class="style-preview" aria-label="光劍與方塊樣式的 3D 預覽"></canvas>
+            </div>
+            <div class="colors">
+              <label><input type="color" id="opt-leftColor" /> 左手（紅）</label>
+              <label><input type="color" id="opt-rightColor" /> 右手（藍）</label>
+              <button id="colors-reset" class="btn ghost small" type="button">恢復預設顏色</button>
+            </div>
+          </div>
+          <div class="card">
+            <h2>樣式</h2>
+            <label class="select">光劍模型
+              <select id="opt-saberModel">
+                <option value="classic">經典</option>
+                <option value="neon">霓虹</option>
+                <option value="katana">武士刀</option>
+                <option value="crystal">水晶</option>
+                <option value="custom">自訂模型（.glb）</option>
+              </select></label>
+            <div class="model-row">
+              <label class="btn small">上傳光劍 .glb<input id="up-saber" type="file" accept=".glb,.gltf,model/gltf-binary" hidden /></label>
+              <span id="name-saber" class="muted small-text">未上傳</span>
+              <button id="rm-saber" class="btn ghost small" type="button" hidden>移除</button>
+            </div>
+            <label class="switch"><input type="checkbox" id="opt-saberFlip" /><span>反轉自訂光劍方向<small>劍柄和劍尖顛倒時使用</small></span></label>
+            <label class="select">方塊模型
+              <select id="opt-noteModel">
+                <option value="classic">經典圓角</option>
+                <option value="mech">機械方塊</option>
+                <option value="neon">霓虹框</option>
+                <option value="outline">外框</option>
+                <option value="custom">自訂模型（.glb）</option>
+              </select></label>
+            <div class="model-row">
+              <label class="btn small">上傳方塊 .glb<input id="up-note" type="file" accept=".glb,.gltf,model/gltf-binary" hidden /></label>
+              <span id="name-note" class="muted small-text">未上傳</span>
+              <button id="rm-note" class="btn ghost small" type="button" hidden>移除</button>
+            </div>
+            <label class="select">牆壁
+              <select id="opt-wallStyle">
+                <option value="translucent">半透明</option>
+                <option value="edges">只顯示邊框</option>
+              </select></label>
+            <details class="help small-help">
+              <summary>自訂模型說明</summary>
+              <p>使用 glTF 2.0（.glb，需內嵌貼圖）。光劍：最長的軸當作劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。方塊：正面朝 +Z，自動縮放置中並套用方塊顏色（名稱含 arrow / white / metal 的材質保持原色）。</p>
+            </details>
+          </div>
+        </div>
+
+        <div id="sub-help" class="sub-panel" data-group="settings" hidden>
+          <div class="card help-card">
+            <h2>操作說明</h2>
+            <ul class="help-list">
+              <li><b>VR</b>：左手紅劍、右手藍劍。依箭頭方向揮砍方塊，圓點方塊任意方向皆可。</li>
+              <li>躲開炸彈與紅色牆壁（頭部進入牆壁會扣血）。</li>
+              <li>VR 中用控制器的雷射指向按鈕、扣扳機點選；搖桿上下可捲動清單。B / Y：暫停 / 返回，A / X（暫停中）：重新開始。</li>
+              <li>VR 選單可直接搜尋下載 BeatSaver 譜面、調整設定、測量身高與校正音訊延遲。</li>
+              <li><b>觀戰畫面</b>：用 PC VR 遊玩時，電腦螢幕會顯示第三人稱視角，按 V 或畫面上方按鈕切換。</li>
+              <li><b>電腦試玩</b>：滑鼠揮動藍劍，按住左鍵改控制紅劍；A/D 左右閃避、S 蹲下；空白鍵暫停。</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <footer class="site-footer">
+        原始碼：<a id="src-zip" href="webxr-saber-source.zip" download>下載原始碼 (.zip)</a>
+        · <a href="https://github.com/kevinchen-pimq/report-ppt/tree/claude/dazzling-heisenberg-tj7g37" target="_blank" rel="noopener">GitHub</a>
+        · 純靜態網頁，解壓縮後用任何 HTTPS / localhost 伺服器即可執行
+        <br />更多 VR 遊戲：<a href="https://xr-arcade.pages.dev/">XR Arcade</a>
+      </footer>
     </div>
 
-    <section id="last-result" class="card result" hidden></section>
-    <div id="status" class="status" role="status"></div>
+    <!-- Selected song, shown at the bottom while browsing other tabs -->
+    <div id="now-bar" class="now-bar" hidden>
+      <button id="now-cover" class="cover pv-btn" type="button" title="試聽">
+        <img id="now-img" alt="" />
+        <span class="pv-ico" aria-hidden="true"></span>
+      </button>
+      <div class="now-text">
+        <div id="now-title" class="r-title"></div>
+        <div id="now-diff" class="r-meta"></div>
+      </div>
+      <button id="now-go" class="btn primary" type="button" data-goto="song">開始玩 ›</button>
+    </div>
 
-    <footer class="site-footer">
-      原始碼：<a id="src-zip" href="webxr-saber-source.zip" download>下載原始碼 (.zip)</a>
-      · <a href="https://github.com/kevinchen-pimq/report-ppt/tree/claude/dazzling-heisenberg-tj7g37" target="_blank" rel="noopener">GitHub</a>
-      · 純靜態網頁，解壓縮後用任何 HTTPS / localhost 伺服器即可執行
-      <br />更多 VR 遊戲：<a href="https://xr-arcade.pages.dev/">XR Arcade</a>
-    </footer>
+    <div id="status" class="status" role="status"></div>
   </main>
+
+  <div id="drag-hint" class="drag-hint" aria-hidden="true"><div>放開以載入譜面（.zip）或歌單（.bplist）</div></div>
 
   <script type="module" src="js/main.js"></script>
 </body>
