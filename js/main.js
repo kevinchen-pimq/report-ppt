@@ -1,9 +1,10 @@
 import { Game } from './game/Game.js';
-import { settings } from './settings.js';
+import { settings, DEFAULTS } from './settings.js';
 import { Library, diffName, defaultSetIndex, mapStats } from './library.js';
 import { searchMaps, mapById, latestVersion, download, searchPlaylists, parsePlaylistId } from './beatsaver.js';
 import { Playlists } from './playlists.js';
 import { DIFF_NAMES } from './mapLoader.js';
+import { StylePreview } from './stylePreview.js';
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');
@@ -18,10 +19,11 @@ const game = new Game($('scene'), {
       menu.classList.remove('hidden');
       if (results) showResult(results);
       if (game.current) selectEntry(game.current.entry, game.current.setIdx, game.current.diffIdx);
+      syncNowBar();
     },
     onError: (e) => status(`載入失敗：${e.message}`, { error: true }),
     onModelsChanged: (names) => syncModelNames(names),
-    onPreviewChange: (st) => syncPreviewButton(st),
+    onPreviewChange: (st) => syncPreviewButtons(st),
   },
 });
 
@@ -40,8 +42,61 @@ function status(msg, { error = false, sticky = false } = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// Tabs (找歌 / 歌曲 / 設定) and sub tabs
+const TABS = ['find', 'song', 'settings'];
+let tab = 'find';
+
+function showTab(name) {
+  if (!TABS.includes(name)) return;
+  const changed = tab !== name;
+  tab = name;
+  for (const b of document.querySelectorAll('.tab[data-tab]')) {
+    const on = b.dataset.tab === name;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', String(on));
+  }
+  for (const t of TABS) $(`tab-${t}`).hidden = t !== name;
+  if (changed) menu.scrollTo({ top: 0 });
+  syncNowBar();
+}
+for (const b of document.querySelectorAll('.tab[data-tab]')) b.addEventListener('click', () => showTab(b.dataset.tab));
+document.addEventListener('click', (e) => {
+  const g = e.target.closest('[data-goto]');
+  if (g) showTab(g.dataset.goto);
+});
+
+function showSub(group, name) {
+  const nav = document.querySelector(`.subnav[data-group="${group}"]`);
+  for (const b of nav.querySelectorAll('.sub')) b.classList.toggle('active', b.dataset.sub === name);
+  for (const p of document.querySelectorAll(`.sub-panel[data-group="${group}"]`)) p.hidden = p.id !== `sub-${name}`;
+}
+for (const nav of document.querySelectorAll('.subnav[data-group]')) {
+  for (const b of nav.querySelectorAll('.sub')) b.addEventListener('click', () => showSub(nav.dataset.group, b.dataset.sub));
+}
+
+// Selected song bar (bottom), shown on the other tabs
+function syncNowBar() {
+  const show = !!current && tab !== 'song' && !menu.classList.contains('hidden');
+  $('now-bar').hidden = !show;
+  document.body.classList.toggle('has-nowbar', show);
+  $('tab-song-dot').hidden = !current;
+  if (!current) return;
+  const { entry } = current;
+  $('now-img').src = entry.coverSrc || '';
+  $('now-title').textContent = entry.info.title;
+  const d = entry.info.sets[current.setIdx]?.diffs[current.diffIdx];
+  $('now-diff').textContent = `${entry.info.artist || ''}${d ? ` · ${diffName(d)}` : ''}`;
+  $('now-cover').dataset.key = entry.key;
+  paintPreviewButton($('now-cover'));
+}
+$('now-cover').addEventListener('click', (ev) => {
+  ev.stopPropagation();
+  if (current) game.togglePreview(current.entry);
+});
+
+// ---------------------------------------------------------------------------
 // Settings (shared with the in-VR menu through the settings store)
-const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'saberFlip'];
+const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'saberFlip', 'showWalls', 'showBombs', 'showDebris'];
 const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle'];
 const RANGES_UI = {
   playerHeight: (v) => `${Number(v).toFixed(2)} m`,
@@ -62,11 +117,20 @@ function syncSettingsUI(v) {
   $('opt-rightColor').value = v.rightColor;
 }
 
+// Live 3D preview of the saber / note / wall styles (appearance settings)
+const stylePreview = new StylePreview($('style-preview'), { getCustom: () => game.customModels });
+
 syncSettingsUI(settings.all);
-settings.subscribe((v) => syncSettingsUI(v));
+stylePreview.update(settings.all);
+settings.subscribe((v) => {
+  syncSettingsUI(v);
+  stylePreview.update(v);
+});
 for (const k of CHECKS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.checked }));
 for (const k of Object.keys(RANGES_UI)) $(`opt-${k}`).addEventListener('input', (e) => settings.set({ [k]: Number(e.target.value) }));
 for (const k of SELECTS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.value }));
+$('height-reset').addEventListener('click', () => settings.set({ playerHeight: DEFAULTS.playerHeight }));
+$('colors-reset').addEventListener('click', () => settings.set({ leftColor: DEFAULTS.leftColor, rightColor: DEFAULTS.rightColor }));
 
 // ---------------------------------------------------------------------------
 // Custom saber / note models (.glb), stored in IndexedDB by the game
@@ -76,6 +140,7 @@ function syncModelNames(names) {
     $(`rm-${kind}`).hidden = !names[kind];
     $(`opt-${kind}Model`).querySelector('option[value="custom"]').disabled = !names[kind];
   }
+  stylePreview.update(settings.all);
 }
 syncModelNames({ saber: null, note: null });
 for (const kind of ['saber', 'note']) {
@@ -147,11 +212,57 @@ $('cal-apply').addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Song preview: every song cover is a play / pause toggle
+function syncPreviewButtons(st = game.previewState) {
+  for (const b of document.querySelectorAll('.pv-btn')) paintPreviewButton(b, st);
+}
+function paintPreviewButton(b, st = game.previewState) {
+  const mine = !!b.dataset.key && st.key === b.dataset.key;
+  const loading = !!(mine && st.loading);
+  const playing = !!(mine && st.playing);
+  b.classList.toggle('loading', loading);
+  b.classList.toggle('playing', playing);
+  b.dataset.state = loading ? 'loading' : playing ? 'playing' : 'idle';
+  const label = loading ? '載入中…' : playing ? '暫停試聽' : '試聽';
+  b.title = label;
+  b.setAttribute('aria-label', label);
+}
+
+/**
+ * Cover image that plays / pauses the song's preview. target: a BeatSaver map doc
+ * (plays BeatSaver's clip, no download) or a library entry.
+ */
+function coverButton(target, src) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'cover pv-btn';
+  b.dataset.key = target.versions ? `bsdoc:${target.id}` : target.key;
+  const img = document.createElement('img');
+  img.loading = 'lazy';
+  img.alt = '';
+  if (src) img.src = src;
+  const ico = document.createElement('span');
+  ico.className = 'pv-ico';
+  ico.setAttribute('aria-hidden', 'true');
+  b.append(img, ico);
+  b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    game.togglePreview(target);
+  });
+  paintPreviewButton(b);
+  return b;
+}
+
+$('preview-btn').addEventListener('click', () => {
+  if (current) game.togglePreview(current.entry);
+});
+
+// ---------------------------------------------------------------------------
 // Map loading
 async function addAndSelect(promise, label) {
   try {
     const entry = await promise;
-    await selectEntry(entry);
+    await selectEntry(entry, undefined, undefined, { open: true });
     status(`已載入：${entry.info.title}${label ? `（${label}）` : ''}`);
     return entry;
   } catch (e) {
@@ -179,16 +290,25 @@ $('file-folder').addEventListener('change', async (e) => {
   e.target.value = '';
 });
 
+// Drag & drop anywhere on the page: .zip maps and .bplist playlists
 const drop = $('drop');
+const isFileDrag = (e) => [...(e.dataTransfer?.types || [])].includes('Files');
+function setDragging(on) {
+  drop.classList.toggle('over', on);
+  document.body.classList.toggle('dragging', on);
+}
 for (const ev of ['dragenter', 'dragover']) {
   document.addEventListener(ev, (e) => {
     e.preventDefault();
-    drop.classList.add('over');
+    if (isFileDrag(e)) setDragging(true);
   });
 }
-for (const ev of ['dragleave', 'drop']) document.addEventListener(ev, () => drop.classList.remove('over'));
+document.addEventListener('dragleave', (e) => {
+  if (!e.relatedTarget) setDragging(false);
+});
 document.addEventListener('drop', async (e) => {
   e.preventDefault();
+  setDragging(false);
   const f = e.dataTransfer.files[0];
   if (f && /\.(bplist|json)$/i.test(f.name)) {
     importBplistFiles([...e.dataTransfer.files]);
@@ -202,20 +322,28 @@ document.addEventListener('drop', async (e) => {
 library.subscribe(renderLibrary);
 const fmtMB = (b) => (b >= 1073741824 ? `${(b / 1073741824).toFixed(b % 1073741824 ? 1 : 0)} GB` : `${(b / 1048576).toFixed(b < 10485760 ? 1 : 0)} MB`);
 
+function clearSelection() {
+  current = null;
+  $('song').hidden = true;
+  $('song-empty').hidden = false;
+  updateButtons();
+  syncNowBar();
+}
+
 function renderLibrary() {
   const ul = $('library');
   ul.innerHTML = '';
-  $('library-info').textContent = library.entries.length ? `${library.entries.length} 首 · ${fmtMB(library.totalSize)} / ${fmtMB(library.limit)}` : '';
-  $('lib-clear').hidden = !library.entries.length;
-  if (!library.entries.length) {
-    ul.innerHTML = '<li class="muted">尚無</li>';
+  const n = library.entries.length;
+  $('library-info').textContent = n ? `${n} 首 · ${fmtMB(library.totalSize)} / ${fmtMB(library.limit)}` : '';
+  $('library-count').textContent = n ? String(n) : '';
+  $('lib-clear').hidden = !n;
+  if (!n) {
+    ul.innerHTML = '<li class="muted">還沒有歌曲。到「搜尋 BeatSaver」下載，或「上傳檔案」。</li>';
     return;
   }
   for (const e of library.entries) {
     const li = document.createElement('li');
-    const img = document.createElement('img');
-    img.alt = '';
-    if (e.coverSrc) img.src = e.coverSrc;
+    if (current?.entry === e) li.className = 'selected';
     const div = document.createElement('div');
     const t = document.createElement('div');
     t.className = 'r-title';
@@ -235,27 +363,19 @@ function renderLibrary() {
     del.addEventListener('click', async (ev) => {
       ev.stopPropagation();
       if (!confirm(`刪除「${e.info.title}」？`)) return;
-      if (current?.entry === e) {
-        current = null;
-        $('song').hidden = true;
-        $('song-empty').hidden = false;
-        updateButtons();
-      }
+      if (current?.entry === e) clearSelection();
       await library.remove(e);
       status(`已刪除：${e.info.title}`);
     });
-    li.append(img, div, size, del);
-    li.addEventListener('click', () => selectEntry(e));
+    li.append(coverButton(e, e.coverSrc), div, size, del);
+    li.addEventListener('click', () => selectEntry(e, undefined, undefined, { open: true }));
     ul.append(li);
   }
 }
 
 $('lib-clear').addEventListener('click', async () => {
   if (!confirm(`刪除全部 ${library.entries.length} 首已存的歌曲？`)) return;
-  current = null;
-  $('song').hidden = true;
-  $('song-empty').hidden = false;
-  updateButtons();
+  clearSelection();
   game.stopPreview();
   await library.clearAll();
   forgetDeepLink(null);
@@ -316,40 +436,59 @@ $('id-form').addEventListener('submit', (e) => {
   if (id) loadById(id);
 });
 
+let lastDocs = [];
+function renderResults() {
+  const list = $('results');
+  list.innerHTML = '';
+  for (const m of lastDocs) {
+    const v = latestVersion(m);
+    const li = document.createElement('li');
+    const div = document.createElement('div');
+    const title = document.createElement('div');
+    title.className = 'r-title';
+    title.textContent = m.name;
+    const meta = document.createElement('div');
+    meta.className = 'r-meta';
+    const diffs = [...new Set((v?.diffs || []).map((d) => DIFF_NAMES[d.difficulty] || d.difficulty))].join(' / ');
+    const mins = Math.floor((m.metadata?.duration || 0) / 60);
+    const secs = String((m.metadata?.duration || 0) % 60).padStart(2, '0');
+    meta.textContent = `${m.metadata?.songAuthorName || ''} · ${m.metadata?.levelAuthorName || ''} · ${mins}:${secs} · ${diffs}`;
+    div.append(title, meta);
+    const have = library.isDownloaded(m);
+    const state = document.createElement('span');
+    state.className = `r-state${have ? ' ok' : ''}`;
+    state.textContent = have ? '✓ 已下載' : '下載';
+    li.append(coverButton(m, v?.coverURL), div, state);
+    li.addEventListener('click', () => loadBeatSaverMap(m).catch((e) => status(e.message, { error: true })));
+    list.append(li);
+  }
+}
+
+let searchSeq = 0;
 async function runSearch(query, sortOrder) {
   const list = $('results');
+  const seq = ++searchSeq;
   list.innerHTML = '<li class="muted">搜尋中…</li>';
   try {
     const docs = await searchMaps(query, 0, sortOrder);
-    list.innerHTML = '';
+    if (seq !== searchSeq) return;
+    lastDocs = docs;
+    renderResults();
     if (!docs.length) list.innerHTML = '<li class="muted">沒有結果</li>';
-    for (const m of docs) {
-      const v = latestVersion(m);
-      const li = document.createElement('li');
-      const img = document.createElement('img');
-      img.loading = 'lazy';
-      img.alt = '';
-      if (v?.coverURL) img.src = v.coverURL;
-      const div = document.createElement('div');
-      const title = document.createElement('div');
-      title.className = 'r-title';
-      title.textContent = m.name;
-      const meta = document.createElement('div');
-      meta.className = 'r-meta';
-      const diffs = [...new Set((v?.diffs || []).map((d) => DIFF_NAMES[d.difficulty] || d.difficulty))].join(' / ');
-      const mins = Math.floor((m.metadata?.duration || 0) / 60);
-      const secs = String((m.metadata?.duration || 0) % 60).padStart(2, '0');
-      meta.textContent = `${m.metadata?.songAuthorName || ''} · ${m.metadata?.levelAuthorName || ''} · ${mins}:${secs} · ${diffs}${library.isDownloaded(m) ? ' · ✓ 已下載' : ''}`;
-      div.append(title, meta);
-      li.append(previewButton(m), img, div);
-      li.addEventListener('click', () => loadBeatSaverMap(m).catch((e) => status(e.message, { error: true })));
-      list.append(li);
-    }
   } catch (e) {
+    if (seq !== searchSeq) return;
     list.innerHTML = '';
     status(e.message, { error: true });
   }
 }
+// keep the "✓ 已下載" marks current
+let resultsTimer = null;
+library.subscribe(() => {
+  clearTimeout(resultsTimer);
+  resultsTimer = setTimeout(() => {
+    if (lastDocs.length) renderResults();
+  }, 200);
+});
 
 $('search-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -371,11 +510,14 @@ let plBusy = false;
 function plItem({ cover, title, meta, state, stateOk, onClick, onDelete, missing, preview }) {
   const li = document.createElement('li');
   if (missing) li.className = 'missing';
-  if (preview) li.append(previewButton(preview));
-  const img = document.createElement('img');
-  img.loading = 'lazy';
-  img.alt = '';
-  if (cover) img.src = cover;
+  if (preview) li.append(coverButton(preview, cover));
+  else {
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.alt = '';
+    if (cover) img.src = cover;
+    li.append(img);
+  }
   const div = document.createElement('div');
   const t = document.createElement('div');
   t.className = 'r-title';
@@ -384,7 +526,7 @@ function plItem({ cover, title, meta, state, stateOk, onClick, onDelete, missing
   m.className = 'r-meta';
   m.textContent = meta;
   div.append(t, m);
-  li.append(img, div);
+  li.append(div);
   if (state) {
     const s = document.createElement('span');
     s.className = `r-state${stateOk ? ' ok' : ''}`;
@@ -410,9 +552,12 @@ function renderPlaylists() {
   const ul = $('playlists');
   const items = playlists.items;
   $('pl-info').textContent = items.length ? `${items.length} 個` : '';
+  $('pl-count').textContent = items.length ? String(items.length) : '';
   if (openPl && !items.some((x) => x.id === openPl.id)) openPl = null;
   $('pl-detail').hidden = !openPl;
   ul.hidden = !!openPl;
+  $('pl-list-title').hidden = !!openPl;
+  if (openPl) $('pl-results').hidden = true;
   if (openPl) return renderPlaylistDetail();
   ul.innerHTML = '';
   if (!items.length) {
@@ -427,7 +572,7 @@ function renderPlaylists() {
       meta: `${pl.author || (pl.source === 'bplist' ? '.bplist' : 'BeatSaver')} · ${pl.songs.length} 首 · 已下載 ${got}`,
       onClick: () => showPlaylist(pl),
       onDelete: async () => {
-        if (!confirm(`刪除歌單「${pl.title}」？（已下載的歌會保留在「已存的歌曲」）`)) return;
+        if (!confirm(`刪除歌單「${pl.title}」？（已下載的歌會保留在「我的歌曲」）`)) return;
         await playlists.remove(pl);
         status(`已刪除歌單：${pl.title}`);
       },
@@ -443,7 +588,6 @@ function renderPlaylistDetail() {
   $('pl-meta').textContent = `${pl.author ? `${pl.author} · ` : ''}${pl.songs.length} 首 · 已下載 ${got}`;
   $('pl-all').disabled = plBusy || got >= pl.songs.length;
   const ul = $('pl-songs');
-  const top = ul.scrollTop;
   ul.innerHTML = '';
   pl.songs.forEach((s, i) => {
     const doc = playlists.docFor(s);
@@ -460,13 +604,14 @@ function renderPlaylistDetail() {
       onClick: doc === null ? null : () => playlistSong(s),
     }));
   });
-  ul.scrollTop = top;
 }
 
 function showPlaylist(pl) {
   openPl = pl;
-  $('pl-songs').scrollTop = 0;
+  showTab('find');
+  showSub('find', 'playlists');
   renderPlaylists();
+  $('pl-detail').scrollIntoView({ block: 'start' });
   playlists.resolve(pl).catch((e) => status(`讀取歌單失敗：${e.message}`, { error: true }));
 }
 
@@ -477,9 +622,8 @@ async function playlistSong(s) {
   try {
     if (!playlists.isDownloaded(s)) status(`下載中：${name}…`, { sticky: true });
     const entry = await playlists.getSong(s, (p) => status(`下載中：${name} ${Math.round(p * 100)}%`, { sticky: true }));
-    await selectEntry(entry);
+    await selectEntry(entry, undefined, undefined, { open: true });
     status(`已載入：${entry.info.title}`);
-    $('song-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
     status(e.message, { error: true });
   }
@@ -545,6 +689,10 @@ $('pl-search-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const q = $('pl-search').value.trim();
   const ul = $('pl-results');
+  if (openPl) {
+    openPl = null;
+    renderPlaylists();
+  }
   ul.hidden = false;
   ul.innerHTML = '<li class="muted">搜尋中…</li>';
   try {
@@ -572,39 +720,8 @@ library.subscribe(renderPlaylists);
 
 // ---------------------------------------------------------------------------
 // Song / difficulty selection
-// Song preview button on the song card
-function syncPreviewButton(st = game.previewState) {
-  const btn = $('preview-btn');
-  const mine = current && st.entry === current.entry;
-  btn.textContent = mine && st.loading ? '載入中…' : mine && st.playing ? '❚❚ 暫停' : '▶ 試聽';
-  btn.classList.toggle('playing', !!(mine && st.playing));
-  for (const b of document.querySelectorAll('.pv-btn')) paintPreviewButton(b, st);
-}
-
-// Small ▶ button on BeatSaver songs: plays BeatSaver's preview clip before downloading
-function previewButton(doc) {
-  const b = document.createElement('button');
-  b.type = 'button';
-  b.className = 'pv-btn';
-  b.dataset.key = `bsdoc:${doc.id}`;
-  b.title = '試聽（不用下載）';
-  b.addEventListener('click', (ev) => {
-    ev.stopPropagation();
-    game.togglePreview(doc);
-  });
-  paintPreviewButton(b);
-  return b;
-}
-function paintPreviewButton(b, st = game.previewState) {
-  const mine = st.key === b.dataset.key;
-  b.textContent = mine && st.loading ? '…' : mine && st.playing ? '❚❚' : '▶';
-  b.classList.toggle('playing', !!(mine && st.playing));
-}
-$('preview-btn').addEventListener('click', () => {
-  if (current) game.togglePreview(current.entry);
-});
-
-async function selectEntry(entry, setIdx, diffIdx) {
+/** open: switch to the 歌曲 tab (unless the player is busy in the settings). */
+async function selectEntry(entry, setIdx, diffIdx, { open = false } = {}) {
   if (game.previewState.entry && game.previewState.entry !== entry) game.stopPreview();
   if (entry.stub) {
     // saved song: load its files from browser storage
@@ -623,12 +740,16 @@ async function selectEntry(entry, setIdx, diffIdx) {
   $('song-empty').hidden = true;
   $('song').hidden = false;
   $('cover').src = entry.coverSrc || '';
+  $('preview-btn').dataset.key = entry.key;
   $('song-title').textContent = info.title;
   $('song-sub').textContent = info.subTitle;
   $('song-artist').textContent = info.artist;
   $('song-meta').textContent = `譜師 ${info.mapper || '-'} · BPM ${Math.round(info.bpm * 100) / 100} · 格式 v${info.version}`;
-  syncPreviewButton();
+  syncPreviewButtons();
   renderSets();
+  renderLibrary();
+  if (open && tab !== 'settings') showTab('song');
+  else syncNowBar();
 }
 
 function renderSets() {
@@ -648,6 +769,9 @@ function renderSets() {
     });
     chars.append(b);
   });
+  // only one mode: no need to choose
+  chars.hidden = info.sets.length < 2;
+  chars.previousElementSibling.hidden = info.sets.length < 2;
   const diffs = $('diffs');
   diffs.innerHTML = '';
   info.sets[current.setIdx].diffs.forEach((d, i) => {
@@ -663,6 +787,7 @@ function renderSets() {
     diffs.append(b);
   });
   previewDiff();
+  syncNowBar();
 }
 
 function previewDiff() {
@@ -691,13 +816,21 @@ function updateButtons() {
   $('vr-menu').disabled = !vrSupported;
 }
 
+/** The game is about to take over the screen: stop the page's own 3D preview. */
+function leavePage() {
+  menu.classList.add('hidden');
+  stylePreview.release();
+  syncNowBar();
+}
+
 async function enterVR(pending) {
   try {
-    menu.classList.add('hidden');
+    leavePage();
     await game.startVR(pending);
   } catch (e) {
     console.error(e);
     menu.classList.remove('hidden');
+    syncNowBar();
     status(`無法進入 VR：${e.message}`, { error: true });
   }
 }
@@ -710,7 +843,7 @@ $('vr-menu').addEventListener('click', () => enterVR(null));
 $('play-desktop').addEventListener('click', () => {
   if (!current?.preview) return;
   if (cal.running) $('cal-start').click();
-  menu.classList.add('hidden');
+  leavePage();
   game.startDesktop(current.entry, current.setIdx, current.diffIdx);
 });
 
@@ -733,6 +866,7 @@ function showResult(r) {
     stats.append(span);
   }
   el.append(h, rank, stats);
+  showTab('song');
 }
 
 // ---------------------------------------------------------------------------
@@ -740,8 +874,11 @@ function showResult(r) {
 let vrSupported = false;
 (async () => {
   const note = $('vr-note');
+  const pill = $('vr-status');
   if (!navigator.xr) {
-    note.textContent = '此瀏覽器不支援 WebXR。請用 Meta Quest 瀏覽器 / PC VR 的 Chrome、Edge 開啟（需 HTTPS）。';
+    note.textContent = '這個瀏覽器不支援 VR（WebXR）。請用 Meta Quest 瀏覽器，或電腦接 PC VR 時用 Chrome / Edge 開啟。也可以先用「電腦試玩」。';
+    pill.textContent = '此瀏覽器不支援 VR';
+    $('vr-menu').title = '這個瀏覽器不支援 VR';
     return;
   }
   try {
@@ -750,10 +887,15 @@ let vrSupported = false;
     vrSupported = false;
   }
   note.textContent = vrSupported
-    ? '已偵測到 VR 裝置。可以先在這裡選歌，或直接進入 VR 選單選歌。'
-    : '找不到 VR 裝置（需要 HTTPS 與支援 WebXR 的頭戴裝置）。仍可使用桌面預覽。';
+    ? '已偵測到 VR 裝置。可以在這裡選好歌再按「在 VR 中遊玩」，或按右上角「進入 VR」在 VR 裡選歌。'
+    : '找不到 VR 裝置（需要 HTTPS 與支援 WebXR 的頭戴裝置）。仍可使用「電腦試玩」。';
+  pill.textContent = vrSupported ? '● 已偵測到 VR' : '未偵測到 VR';
+  pill.classList.toggle('ok', vrSupported);
+  if (!vrSupported) $('vr-menu').title = '找不到 VR 裝置';
   updateButtons();
 })();
+
+window.addEventListener('pagehide', () => stylePreview.dispose());
 
 // ---------------------------------------------------------------------------
 // Songs saved in this browser
@@ -783,3 +925,4 @@ document.querySelector('.chip[data-sort="Rating"]').classList.add('active');
 window.__game = game;
 window.__library = library;
 window.__playlists = playlists;
+window.__stylePreview = stylePreview;
