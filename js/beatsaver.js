@@ -76,21 +76,40 @@ export function latestVersion(map) {
   return versions.find((v) => v.state === 'Published') || versions[0];
 }
 
-/** Downloads a URL into an ArrayBuffer, reporting progress (0..1). */
-export async function download(url, onProgress) {
-  const res = await fetch(url);
+/**
+ * Downloads a URL into an ArrayBuffer, reporting progress (0..1).
+ * options (all optional, used by the download manager):
+ *   signal  — AbortSignal to cancel the transfer
+ *   gate    — called before each read; may return a promise that holds the read
+ *             back (pause) and resolves to continue or rejects to stop
+ *   onBytes — onBytes(received, total) after each chunk (total 0 = unknown)
+ */
+export async function download(url, onProgress, { signal, gate, onBytes } = {}) {
+  const res = await fetch(url, signal ? { signal } : undefined);
   if (!res.ok) throw new Error(`下載失敗 (${res.status})`);
   const total = Number(res.headers.get('content-length')) || 0;
-  if (!res.body || !total) return res.arrayBuffer();
+  if (!res.body || (!total && !gate && !onBytes)) {
+    const buf = await res.arrayBuffer();
+    onBytes?.(buf.byteLength, total || buf.byteLength);
+    return buf;
+  }
   const reader = res.body.getReader();
   const chunks = [];
   let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    received += value.length;
-    onProgress?.(received / total);
+  try {
+    for (;;) {
+      const wait = gate?.();
+      if (wait) await wait;
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      onBytes?.(received, total);
+      if (total) onProgress?.(Math.min(1, received / total));
+    }
+  } catch (e) {
+    reader.cancel().catch(() => {});
+    throw e;
   }
   const out = new Uint8Array(received);
   let pos = 0;

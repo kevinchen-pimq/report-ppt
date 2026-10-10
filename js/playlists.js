@@ -2,6 +2,7 @@
 // Saved in the browser next to the songs; songs download on demand.
 import { songCache } from './songCache.js';
 import { fetchPlaylist, mapsByHashes, mapById, latestVersion } from './beatsaver.js';
+import { downloads } from './downloads.js';
 
 function imageDataUrl(image) {
   if (!image || typeof image !== 'string') return null;
@@ -148,29 +149,60 @@ export class Playlists {
     return !!v && this.library.has(`bs:${v.hash}`);
   }
 
-  /** Downloads (or loads the saved copy of) one playlist song; returns the library entry. */
-  async getSong(song, onProgress) {
+  /** Download job id (= library key) of a playlist song, or null if not known yet. */
+  jobId(song) {
     const doc = this.docFor(song);
-    if (!doc) throw new Error(`BeatSaver 上找不到「${song.name || song.hash}」`);
-    return this.library.addBeatSaver(doc, onProgress, song.hash);
+    return doc ? this.library.beatSaverKey(doc, song.hash) : null;
   }
 
-  /** Downloads every song not saved yet; onProgress(done, total, song). */
+  /**
+   * Downloads (or loads the saved copy of) one playlist song; returns the library entry.
+   * opts go to library.addBeatSaver ({ group, label, cover }).
+   */
+  async getSong(song, onProgress, opts = {}) {
+    const doc = this.docFor(song);
+    if (!doc) throw new Error(`BeatSaver 上找不到「${song.name || song.hash}」`);
+    return this.library.addBeatSaver(doc, onProgress, song.hash, opts);
+  }
+
+  /**
+   * Downloads every song not saved yet, queued in the download manager with
+   * group = pl.id (at most 2 at a time). downloads.cancelAll(pl.id) stops it:
+   * the rest are cancelled and this returns. onProgress(done, total, song) —
+   * song is the next one still in progress (null at the end).
+   * Returns { downloaded, failed, cancelled, total }; a user cancel is not a failure.
+   */
   async downloadAll(pl, onProgress) {
-    await this.resolve(pl);
-    const todo = pl.songs.filter((s) => this.docFor(s) && !this.isDownloaded(s));
-    let done = 0;
-    let failed = 0;
-    for (const s of todo) {
-      onProgress?.(done, todo.length, s);
-      try {
-        await this.getSong(s);
-      } catch (e) {
-        failed++;
-      }
-      done++;
+    const stop = downloads.watchGroup(pl.id);
+    try {
+      await this.resolve(pl);
+      const todo = pl.songs.filter((s) => this.docFor(s) && !this.isDownloaded(s));
+      const total = todo.length;
+      if (stop.cancelled) return { downloaded: 0, failed: 0, cancelled: total, total };
+      let downloaded = 0;
+      let failed = 0;
+      let cancelled = 0;
+      const pending = new Set(todo);
+      const next = () => todo.find((s) => pending.has(s)) || null;
+      onProgress?.(0, total, next());
+      await Promise.all(
+        todo.map((s) =>
+          // stop waiting as soon as the group is cancelled (also for songs that joined
+          // a download started elsewhere, which keeps going)
+          Promise.race([this.getSong(s, null, { group: pl.id }), stop.promise])
+            .then(
+              () => downloaded++,
+              (e) => (e.name === 'AbortError' ? cancelled++ : failed++),
+            )
+            .then(() => {
+              pending.delete(s);
+              onProgress?.(total - pending.size, total, next());
+            }),
+        ),
+      );
+      return { downloaded, failed, cancelled, total };
+    } finally {
+      stop.dispose();
     }
-    onProgress?.(done, todo.length, null);
-    return { downloaded: done - failed, failed, total: todo.length };
   }
 }

@@ -5,8 +5,9 @@
 import { zipSync } from 'fflate';
 import { filesFromZip, filesFromFileList, parseInfo, coverUrl, resolveColors, DIFF_NAMES } from './mapLoader.js';
 import { parseDifficulty } from './beatmap.js';
-import { latestVersion, download } from './beatsaver.js';
+import { latestVersion } from './beatsaver.js';
 import { songCache, CACHE_LIMIT } from './songCache.js';
+import { downloads } from './downloads.js';
 
 const KEEP_LOADED = 3; // songs whose files stay in memory
 
@@ -168,15 +169,39 @@ export class Library {
     return this.addFiles(await filesFromFileList(list), label);
   }
 
-  /** Downloads a BeatSaver map document (from search / id lookup); reuses a saved copy. */
-  async addBeatSaver(doc, onProgress, hash = null) {
+  /** The version of a map to download: the pinned one (hash) if it still exists, else the latest. */
+  static versionFor(doc, hash = null) {
+    return (hash && doc.versions?.find((x) => x.hash === hash.toLowerCase())) || latestVersion(doc);
+  }
+
+  /** Library key (= download job id) of a BeatSaver map, or null. */
+  beatSaverKey(doc, hash = null) {
+    const v = doc && Library.versionFor(doc, hash);
+    return v ? `bs:${v.hash}` : null;
+  }
+
+  /**
+   * Downloads a BeatSaver map document (from search / id lookup); reuses a saved copy.
+   * Goes through the download manager (queue, pause / resume / cancel; see downloads.js).
+   * opts: { group, label (default doc.name), cover (default the version's cover URL) }.
+   * A cancelled download rejects with an Error named 'AbortError'.
+   */
+  async addBeatSaver(doc, onProgress, hash = null, opts = {}) {
     // a playlist may pin a specific version (hash); otherwise use the latest
-    const v = (hash && doc.versions?.find((x) => x.hash === hash.toLowerCase())) || latestVersion(doc);
+    const v = Library.versionFor(doc, hash);
     if (!v) throw new Error('此譜面沒有可下載的版本');
-    const existing = this.entries.find((e) => e.key === `bs:${v.hash}`);
+    const key = `bs:${v.hash}`;
+    const existing = this.entries.find((e) => e.key === key);
     if (existing) return this.load(existing);
-    const buf = await download(v.downloadURL, onProgress);
-    return this.addZip(buf, `BeatSaver ${doc.id}`, { key: `bs:${v.hash}`, beatsaverId: doc.id });
+    return downloads.start({
+      id: key,
+      url: v.downloadURL,
+      label: opts.label ?? doc.name,
+      cover: opts.cover ?? v.coverURL ?? null,
+      group: opts.group ?? null,
+      onProgress,
+      then: (buf) => this.addZip(buf, `BeatSaver ${doc.id}`, { key, beatsaverId: doc.id }),
+    });
   }
 
   isDownloaded(doc) {
