@@ -897,13 +897,30 @@ export class Menu {
     p.text('光劍顏色可在網頁設定中更改', L, 700, { size: 22, color: THEME.muted });
 
     const pct = (v) => `${Math.round(v * 100)}%`;
-    this.stepperRow(p, 'set-vol', R, 110, '音樂音量', 'volume', pct);
-    this.stepperRow(p, 'set-sfx', R, 200, '打擊音效', 'sfxVolume', pct);
-    this.stepperRow(p, 'set-angle', R, 290, '光劍角度', 'saberAngle', (v) => `${v}°`);
-    this.stepperRow(p, 'set-latency', R, 380, '音訊延遲', 'audioLatencyMs', (v) => `${v > 0 ? '+' : ''}${v} ms`);
-    this.stepperRow(p, 'set-height', R, 470, '身高', 'playerHeight', (v) => `${v.toFixed(2)} m`);
-    p.button('set-go-cal', R, 575, 470, 70, '前往身高 / 延遲校正', { size: 26, onClick: () => this.open('calibrate') });
-    this.toggleRow(p, 'set-fps', R, 662, '顯示幀率 (FPS)', 'showFps');
+    this.stepperRow(p, 'set-vol', R, 95, '音樂音量', 'volume', pct);
+    this.stepperRow(p, 'set-sfx', R, 168, '打擊音效', 'sfxVolume', pct);
+    this.stepperRow(p, 'set-angle', R, 241, '光劍角度', 'saberAngle', (v) => `${v}°`);
+    this.stepperRow(p, 'set-latency', R, 314, '音訊延遲', 'audioLatencyMs', (v) => `${v > 0 ? '+' : ''}${v} ms`);
+    this.stepperRow(p, 'set-height', R, 387, '身高', 'playerHeight', (v) => `${v.toFixed(2)} m`);
+    this.stepperRow(p, 'set-scale', R, 460, '解析度', 'renderScale', pct);
+    // refresh rate: what the headset offers (all common ones outside VR)
+    const offered = this.game.supportedFrameRates;
+    const rates = [0, ...(offered.length ? offered : [72, 90, 120]).filter((r) => r >= 60).slice(-4)];
+    const cur = Number(settings.get('refreshRate')) || 0;
+    p.text('更新率', R, 578, { size: 30 });
+    const bw = Math.min(90, Math.floor(330 / rates.length) - 6);
+    rates.forEach((r, i) => {
+      p.button(`set-hz-${r}`, R + 470 - rates.length * (bw + 6) + 6 + i * (bw + 6), 541, bw, 56, r ? `${Math.round(r)}` : '自動', {
+        size: 22,
+        active: cur === r,
+        onClick: () => settings.set({ refreshRate: r }),
+      });
+    });
+    this.toggleRow(p, 'set-fps', R, 606, '顯示幀率 (FPS)', 'showFps');
+    p.button('set-go-cal', R, 690, 470, 62, '前往身高 / 延遲校正', { size: 26, onClick: () => this.open('calibrate') });
+    if ((settings.get('renderScale') || 1) !== (this.game.appliedRenderScale || 1) && this.game.xrSession) {
+      p.text('解析度：下次進入 VR 生效', R, 778, { size: 20, color: THEME.muted });
+    }
   }
 
   // ----- appearance -------------------------------------------------------------

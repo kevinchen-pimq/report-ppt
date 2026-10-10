@@ -486,7 +486,7 @@ export class NoteManager {
 
     const color = this.colors[note.color] || this.colors[1];
     const noteVel = _b.set(0, 0, this.njs);
-    this.effects.spawnDebris(obj.body, color, p, _n, cutDirW, noteVel);
+    this.effects.spawnDebris(obj.body, this.style.debrisLayers(note.color === 1 ? 1 : 0, obj.kind === 'link'), _n, cutDirW, noteVel);
     this.effects.spawnSparks(p, color, good ? 30 : 12, 3, cutDirW);
 
     if (good) this.cb.onCut(note, saber, { distance: dist, autoplay, cutDir: cutDirW.clone(), position: p.clone() });

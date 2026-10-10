@@ -52,7 +52,7 @@ export class Game {
     renderer.localClippingEnabled = true;
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType('local-floor');
-    renderer.xr.setFramebufferScaleFactor(1.0);
+    renderer.xr.setFramebufferScaleFactor(settings.get('renderScale') || 1); // set again on each VR entry
     container.appendChild(renderer.domElement);
     this.renderer = renderer;
 
@@ -129,6 +129,12 @@ export class Game {
     this.notes.setOptions({ walls: s.showWalls !== false, bombs: s.showBombs !== false });
     this.effects.setShowDebris(s.showDebris !== false);
     this.fps.setEnabled(s.showFps);
+    if (this.xrSession) {
+      this.applyRefreshRate();
+      if ((s.renderScale || 1) !== this.appliedRenderScale && this.state === 'menu') {
+        this.menu.setStatus(`解析度 ${Math.round(s.renderScale * 100)}% 會在下次進入 VR 時生效`);
+      }
+    }
     if (this.state !== 'playing') {
       setPlayerHeight(s.playerHeight);
       this.applyColors();
@@ -313,6 +319,9 @@ export class Game {
     const session = await navigator.xr.requestSession('immersive-vr', {
       optionalFeatures: ['local-floor', 'bounded-floor'],
     });
+    // render resolution can only be chosen before the session's layer is created
+    this.appliedRenderScale = this.settings.renderScale || 1;
+    this.renderer.xr.setFramebufferScaleFactor(this.appliedRenderScale);
     this.mode = 'vr';
     session.addEventListener('end', () => this.onSessionEnd());
     session.addEventListener('visibilitychange', () => {
@@ -323,9 +332,27 @@ export class Game {
     // the frame-rate counter judges against the headset's refresh rate
     this.fps.setTarget(session.frameRate || 72);
     session.addEventListener('frameratechange', () => this.fps.setTarget(session.frameRate));
+    this.applyRefreshRate();
     this.spectator.start();
     if (pending) this.playEntry(pending.entry, pending.setIdx, pending.diffIdx);
     else this.showMenu(this.library.entries.length ? 'library' : 'browse');
+  }
+
+  /** Refresh rates the headset offers (empty if it can't change them). */
+  get supportedFrameRates() {
+    const r = this.xrSession?.supportedFrameRates;
+    return r && this.xrSession.updateTargetFrameRate ? [...r] : [];
+  }
+
+  /** Asks the headset for the refresh rate chosen in the settings (closest one it supports). */
+  applyRefreshRate() {
+    const session = this.xrSession;
+    const want = Number(this.settings.refreshRate) || 0;
+    const rates = this.supportedFrameRates;
+    if (!session || !want || !rates.length) return;
+    const rate = rates.reduce((best, r) => (Math.abs(r - want) < Math.abs(best - want) ? r : best), rates[0]);
+    if (session.frameRate === rate) return;
+    session.updateTargetFrameRate(rate).catch((e) => console.warn('無法切換更新率', e));
   }
 
   startDesktop(entry, setIdx, diffIdx) {

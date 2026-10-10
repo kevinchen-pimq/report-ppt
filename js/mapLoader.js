@@ -33,18 +33,64 @@ export class MapFiles {
   }
 }
 
-export async function filesFromZip(arrayBuffer) {
-  const u8 = new Uint8Array(arrayBuffer);
-  const entries = await new Promise((resolve) => {
+// One background worker unzips archives (see unzipWorker.js); falls back to fflate here.
+let worker = null;
+let workerFailed = false;
+let nextId = 0;
+const pending = new Map();
+function unzipWorker() {
+  if (worker || workerFailed) return worker;
+  try {
+    worker = new Worker(new URL('./unzipWorker.js', import.meta.url), { type: 'module' });
+    worker.onmessage = (e) => {
+      const p = pending.get(e.data.id);
+      pending.delete(e.data.id);
+      if (!p) return;
+      if (e.data.error) p.reject(new Error(e.data.error));
+      else p.resolve(e.data.files);
+    };
+    worker.onerror = () => {
+      // e.g. module workers unsupported: unzip here from now on
+      workerFailed = true;
+      worker = null;
+      for (const p of pending.values()) p.reject(new Error('worker'));
+      pending.clear();
+    };
+  } catch (e) {
+    workerFailed = true;
+    worker = null;
+  }
+  return worker;
+}
+
+function unzipHere(u8) {
+  return new Promise((resolve) => {
     try {
-      unzip(u8, (err, data) => {
-        if (err) resolve(unzipSync(u8));
-        else resolve(data);
-      });
+      unzip(u8, (err, data) => resolve(err ? unzipSync(u8) : data));
     } catch (e) {
       resolve(unzipSync(u8));
     }
   });
+}
+
+/** Unzips a map archive (the buffer may be transferred to the worker: pass a copy if you still need it). */
+export async function filesFromZip(arrayBuffer) {
+  let entries = null;
+  const w = unzipWorker();
+  if (w) {
+    const copy = arrayBuffer.slice(0); // kept in case the worker fails
+    try {
+      entries = await new Promise((resolve, reject) => {
+        const id = ++nextId;
+        pending.set(id, { resolve, reject });
+        w.postMessage({ id, buffer: arrayBuffer }, [arrayBuffer]);
+      });
+    } catch (e) {
+      if (e.message !== 'worker') throw new Error(`無法解壓縮：${e.message}`);
+      arrayBuffer = copy;
+    }
+  }
+  if (!entries) entries = await unzipHere(new Uint8Array(arrayBuffer));
   return new MapFiles(Object.entries(entries));
 }
 

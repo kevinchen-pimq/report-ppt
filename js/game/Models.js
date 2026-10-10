@@ -31,7 +31,10 @@ const BLADE_MID = BLADE_START - BLADE_LEN / 2;
 // Edge-glow shader: bright borders of fixed world-space width on every face of
 // a (possibly non-uniformly scaled) box, plus an optional translucent fill.
 
+// The note shaders include three.js' clipping chunks (inert unless the material has
+// clippingPlanes), so the cut halves can reuse them.
 const EDGE_VERT = /* glsl */ `
+  #include <clipping_planes_pars_vertex>
   varying vec3 vPos;
   varying vec3 vNormal;
   varying vec3 vScale;
@@ -39,7 +42,9 @@ const EDGE_VERT = /* glsl */ `
     vPos = position;
     vNormal = normal;
     vScale = vec3(length(modelMatrix[0].xyz), length(modelMatrix[1].xyz), length(modelMatrix[2].xyz));
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    #include <clipping_planes_vertex>
+    gl_Position = projectionMatrix * mvPosition;
   }
 `;
 
@@ -53,7 +58,9 @@ const EDGE_FRAG = /* glsl */ `
   varying vec3 vPos;
   varying vec3 vNormal;
   varying vec3 vScale;
+  #include <clipping_planes_pars_fragment>
   void main() {
+    #include <clipping_planes_fragment>
     vec3 a = abs(vNormal);
     // distance (metres) from this fragment to the nearest border of its face
     vec3 d = (size * 0.5 - abs(vPos)) * vScale;
@@ -80,6 +87,7 @@ export function createEdgeGlowMaterial({ color = 0xffffff, fill = 0.15, edge = 0
     },
     vertexShader: EDGE_VERT,
     fragmentShader: EDGE_FRAG,
+    clipping: true,
     transparent: true,
     depthWrite: false,
     side: THREE.DoubleSide,
@@ -92,11 +100,14 @@ export function createEdgeGlowMaterial({ color = 0xffffff, fill = 0.15, edge = 0
 // remains, from any viewing angle. glow = soft band fading outward (additive).
 
 const HULL_VERT = /* glsl */ `
+  #include <clipping_planes_pars_vertex>
   uniform float thickness;
   varying float vFacing;
   void main() {
     vec3 p = position + normalize(normal) * thickness;
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    vec4 mvPosition = mv;
+    #include <clipping_planes_vertex>
     vec3 n = normalize(normalMatrix * normal);
     // |n·v| is ~0 at the outer contour and grows toward the body: used to fade the glow outward
     vFacing = abs(dot(n, normalize(-mv.xyz)));
@@ -109,7 +120,9 @@ const HULL_FRAG = /* glsl */ `
   uniform float opacity;
   uniform float glow;
   varying float vFacing;
+  #include <clipping_planes_pars_fragment>
   void main() {
+    #include <clipping_planes_fragment>
     float a = glow > 0.5 ? opacity * pow(vFacing, 1.5) : opacity;
     gl_FragColor = vec4(color, a);
     #include <colorspace_fragment>
@@ -126,6 +139,7 @@ export function createHullMaterial({ color = 0xffffff, thickness = 0.012, opacit
     },
     vertexShader: HULL_VERT,
     fragmentShader: HULL_FRAG,
+    clipping: true,
     side: THREE.BackSide,
     transparent: glow,
     depthWrite: !glow,
@@ -142,8 +156,11 @@ const GLASS_VERT = /* glsl */ `
   varying vec3 vV;
   varying vec3 vObjN;
   varying vec3 vObjP;
+  #include <clipping_planes_pars_vertex>
   void main() {
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
+    vec4 mvPosition = mv;
+    #include <clipping_planes_vertex>
     vN = normalize(normalMatrix * normal);
     vV = normalize(-mv.xyz);
     vObjN = normal;
@@ -159,7 +176,9 @@ const GLASS_FRAG = /* glsl */ `
   varying vec3 vV;
   varying vec3 vObjN;
   varying vec3 vObjP;
+  #include <clipping_planes_pars_fragment>
   void main() {
+    #include <clipping_planes_fragment>
     vec3 an = abs(normalize(vObjN));
     float flatness = max(an.x, max(an.y, an.z));            // 1 on flat faces, < 1 on the rounded bevels
     float bevel = 1.0 - smoothstep(0.86, 0.997, flatness);  // glassy band on every rounded edge
@@ -181,6 +200,7 @@ export function createGlassMaterial(color) {
     uniforms: { color: { value: new THREE.Color(color) }, halfSize: { value: NOTE_SIZE / 2 } },
     vertexShader: GLASS_VERT,
     fragmentShader: GLASS_FRAG,
+    clipping: true,
   });
 }
 
@@ -620,6 +640,21 @@ export class NoteStyle {
       group.add(glow, halo);
     }
     return { group, body };
+  }
+
+  /**
+   * How a cut half of a note / link of colour c is drawn: the style's own layers, all on
+   * the body geometry. double = draw back faces too, so the open cut doesn't look hollow.
+   */
+  debrisLayers(c, link = false) {
+    const L = [{ mat: this.mats[c], double: true }];
+    if (this.id === 'neon') L.push({ mat: link ? this.linkFrameMats[c] : this.frameMats[c] });
+    if (this.id === 'outline') {
+      L.push({ mat: link ? this.linkHullMats[c] : this.hullMats[c] });
+      if (!link) L.push({ mat: this.hullGlowMats[c], renderOrder: 1 });
+    }
+    if (this.id === 'classic' && !link) L.push({ mat: this.hullGlowMats[c], renderOrder: 1 });
+    return L;
   }
 
   buildLink(c) {

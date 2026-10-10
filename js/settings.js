@@ -24,6 +24,8 @@ export const DEFAULTS = {
   showBombs: true, // false = maps play without bombs
   showDebris: true, // false = cut blocks vanish instead of splitting into halves
   showFps: false, // frame-rate counter in the lower left of the view
+  renderScale: 1, // VR render resolution (WebXR framebuffer scale); takes effect when entering VR
+  refreshRate: 0, // VR refresh rate to request (Hz); 0 = the headset's default
 };
 
 // Ranges and steps used by both UIs
@@ -33,6 +35,7 @@ export const RANGES = {
   sfxVolume: { min: 0, max: 1, step: 0.05 },
   saberAngle: { min: -60, max: 60, step: 5 },
   playerHeight: { min: 1.2, max: 2.3, step: 0.01 },
+  renderScale: { min: 0.5, max: 1.5, step: 0.1 },
 };
 
 function read(key) {

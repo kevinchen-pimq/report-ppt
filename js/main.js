@@ -105,6 +105,7 @@ const RANGES_UI = {
   volume: (v) => `${Math.round(v * 100)}%`,
   sfxVolume: (v) => `${Math.round(v * 100)}%`,
   saberAngle: (v) => `${v}°`,
+  renderScale: (v) => `${Math.round(v * 100)}%`,
 };
 
 function syncSettingsUI(v) {
@@ -114,6 +115,7 @@ function syncSettingsUI(v) {
     $(`out-${k}`).textContent = fmt(v[k]);
   }
   for (const k of SELECTS) $(`opt-${k}`).value = v[k];
+  $('opt-refreshRate').value = String(v.refreshRate || 0);
   $('opt-leftColor').value = v.leftColor;
   $('opt-rightColor').value = v.rightColor;
 }
@@ -130,6 +132,7 @@ settings.subscribe((v) => {
 for (const k of CHECKS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.checked }));
 for (const k of Object.keys(RANGES_UI)) $(`opt-${k}`).addEventListener('input', (e) => settings.set({ [k]: Number(e.target.value) }));
 for (const k of SELECTS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.value }));
+$('opt-refreshRate').addEventListener('change', (e) => settings.set({ refreshRate: Number(e.target.value) }));
 $('height-reset').addEventListener('click', () => settings.set({ playerHeight: DEFAULTS.playerHeight }));
 $('colors-reset').addEventListener('click', () => settings.set({ leftColor: DEFAULTS.leftColor, rightColor: DEFAULTS.rightColor }));
 
