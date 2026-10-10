@@ -5,17 +5,18 @@
 // Light groups (v2 basic event type → lights, in light-ID order; Chroma lightID n = index n-1):
 //   0  "Water 4"  4: L channel strip, R channel strip, L glow, R glow  (far channel, z -31.5 … horizon)
 //   1  "Water 1"  4: L, R, L glow, R glow                               (channel segment z -7.5 … -15.5)
-//   2  left sun rays   18 (spin with event 12)
-//   3  right sun rays  18 (spin with event 13)
-//   4  sun / moon       1 (disc + halo)
+//   2  left sun rays    4 (18 rays in 4 bundles, top → bottom; spin with event 12)
+//   3  right sun rays   4 (same on the right; event 13)
+//   4  sun / moon       5: 1 disc, 2 halo, 3 reflection on the water, 4 / 5 horizon glow left / right
 //   6  "Water 2"  4: L, R, L glow, R glow                               (z -15.5 … -23.5)
 //   7  "Water 3"  4: L, R, L glow, R glow                               (z -23.5 … -31.5)
 //   10 left bottom lasers   9 (near → far)
 //   11 right bottom lasers  9 (near → far)
 // Source for groups / counts / ID order: BSMG wiki basic-lighting table (water channel lights,
 // left/right rays, sun/moon, left/right lasers; 6/7 extra water, 10/11 lasers) and the light IDs
-// in ChroMapper's community Billie platform (read for facts only). Not handled here: rain toggle
-// (event 8 in this environment) and ray mode (event 9) — the contract maps 8/9 to rings.
+// in ChroMapper's community Billie platform (read for facts only); counts per Heck's light-ID table.
+// Environment events (customEvents): 8 toggles the rain, 9 toggles the ray mode (a half fan on
+// each side ↔ the two sides interleaved into one full sunburst). No rings.
 // Default colours: Beat Saber Billie scheme (as listed by ArcViewer / ChroMapper / BSMG wiki).
 import {
   THREE, LightBank, GEO, MultiLight, V, rng, tubeMatrix, trs, mergeStatic,
@@ -118,7 +119,7 @@ export default {
     const coreBank = new LightBank(root, GEO.plane, 16);
     const glowGeo = fadeStripGeometry();
     owned.push(glowGeo);
-    const glowBank = new LightBank(root, glowGeo, 16, { material: softLightMaterial({ opacity: 0.55 }) });
+    const glowBank = new LightBank(root, glowGeo, 19, { material: softLightMaterial({ opacity: 0.55 }) });
     banks.push(coreBank, glowBank);
     const flat = [-Math.PI / 2, 0, 0];
     const water = (z0, z1) => {
@@ -141,14 +142,19 @@ export default {
     const sunBank = new LightBank(root, discGeo, 1, { material: softLightMaterial() });
     const haloBank = new LightBank(root, haloGeo, 1, { material: softLightMaterial({ opacity: 0.6 }) });
     banks.push(sunBank, haloBank);
-    groups[4] = [new MultiLight([
+    groups[4] = [
       sunBank.add(trs([SUN.x, SUN.y, SUN.z], [0, 0, 0], [6.5, 6.5, 1])),
-      haloBank.add(trs([SUN.x, SUN.y, SUN.z - 0.5], [0, 0, 0], [26, 26, 1])),
-    ], [1, 0.7])];
+      new MultiLight([haloBank.add(trs([SUN.x, SUN.y, SUN.z - 0.5], [0, 0, 0], [26, 26, 1]))], [0.7]),
+      // reflection: a soft streak on the water from the horizon toward the player
+      new MultiLight([glowBank.add(trs([SUN.x, WATER_Y + 0.015, -95], flat, [7, 90, 1]))], [0.45]),
+      // horizon glow either side of the sun
+      ...[-1, 1].map((s) => new MultiLight([glowBank.add(trs([s * 34, 6, SUN.z + 4], [0, 0, Math.PI / 2], [9, 56, 1]))], [0.5])),
+    ];
 
     // sun rays (groups 2 / 3): 18 thin beams per side radiating from the sun. Each side is one
     // bank inside a pivot at the sun, spun around Z (facing the player) by laser speed 12 / 13.
     const lasers = { left: [], right: [] };
+    const rayModes = [];
     for (const [type, side, list] of [[2, -1, lasers.left], [3, 1, lasers.right]]) {
       const pivot = new THREE.Group();
       pivot.position.copy(SUN).add(V(0, 0, 1));
@@ -157,13 +163,27 @@ export default {
       list.push(pivot);
       const bank = new LightBank(pivot, GEO.tube, 18);
       banks.push(bank);
+      const rays = [];
       for (let i = 0; i < 18; i++) {
-        // left rays on the left half, right rays on the right half (rest pose), 10° apart
+        // ray mode 0: left rays on the left half, right rays on the right half, 10° apart;
+        // ray mode 1: both sides interleaved around the full circle, 10° apart
         const a = (side < 0 ? Math.PI / 2 : -Math.PI / 2) + ((i + 0.5) / 18) * Math.PI;
-        const dir = V(Math.cos(a), Math.sin(a), 0);
-        groups[type].push(bank.add(tubeMatrix(dir.clone().multiplyScalar(7.5), dir.clone().multiplyScalar(240), 0.22)));
+        const b = Math.PI / 2 + ((i * 2 + (side < 0 ? 0 : 1) + 0.5) / 36) * Math.PI * 2;
+        const modes = [a, b].map((ang) => {
+          const dir = V(Math.cos(ang), Math.sin(ang), 0);
+          return tubeMatrix(dir.clone().multiplyScalar(7.5), dir.clone().multiplyScalar(240), 0.22, new THREE.Matrix4());
+        });
+        rays.push(bank.add(modes[0]));
+        rayModes.push({ bank, index: rays[i].index, modes });
       }
+      // 4 light IDs per side: bundles of neighbouring rays
+      for (let k = 0; k < 4; k++) groups[type].push(new MultiLight(rays.filter((_, i) => Math.floor((i * 4) / 18) === k)));
     }
+    let rayMode = 0;
+    const setRayMode = (mode) => {
+      rayMode = mode;
+      for (const r of rayModes) r.bank.setMatrix(r.index, r.modes[mode]);
+    };
 
     // bottom lasers (10 / 11): 9 per side rising out of the water left / right of the track,
     // leaning outwards and back over the player's shoulders
@@ -184,6 +204,15 @@ export default {
       groups,
       rings: [],
       lasers,
+      customEvents: [8, 9],
+      onEvent(type) {
+        if (type === 8) rain.visible = !rain.visible; // rain toggle
+        else if (type === 9) setRayMode(1 - rayMode); // ray mode
+      },
+      reset() {
+        rain.visible = true;
+        setRayMode(0);
+      },
       update(t) {
         rainY = -((t * 16) % RAIN_H);
         rain.position.y = rainY;

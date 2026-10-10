@@ -17,8 +17,9 @@
 // Counts: Chroma's light ID table for BTSEnvironment (Aeroluna/Heck). Layout and rough positions:
 // ChroMapper's community recreation (facts only); the in-group ID order is approximate.
 // Rings: two 'big' ring sets = the 30 slabs of each striped tower (event 8 "tower spin" rotates
-// them around the vertical axis). Event 9 (pillar control) is not modelled. Lasers: the 9 emitters
-// per side spin around the track axis with events 12 / 13.
+// them around the vertical axis). Environment event (customEvents) 9 = pillar control: the eight
+// pillars (with the beams rising from them) sink 8 m into the clouds / rise again. Lasers: the 9
+// emitters per side spin around the track axis with events 12 / 13.
 import { THREE, GEO, GlowBank, Rig, PropBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const D2R = Math.PI / 180;
@@ -54,13 +55,14 @@ export default {
 
     // ---- static: pillars, logo blocks, staircase ----------------------------------------------
     const sg = [];
+    const pg = []; // the pillars move (event 9): own mesh
     for (const s of [-1, 1]) {
       for (const [x, z, top] of PILLARS) {
         const h = top + 14;
         const g = new THREE.BoxGeometry(2.6, h, 2.6);
         g.rotateY(45 * D2R);
         g.translate(s * x, top - h / 2, z);
-        sg.push(g);
+        pg.push(g);
       }
       // big blocks flanking the logo
       const b = new THREE.BoxGeometry(3.6, 30, 5);
@@ -75,8 +77,9 @@ export default {
       sg.push(g);
     }
     const statics = mergeGeos(sg, stone);
-    root.add(statics);
-    owned.push(statics.geometry);
+    const pillars = mergeGeos(pg, stone);
+    root.add(statics, pillars);
+    owned.push(statics.geometry, pillars.geometry);
 
     // ---- clouds (instanced puffs below the track) ---------------------------------------------
     const puffGeo = new THREE.IcosahedronGeometry(1, 1);
@@ -177,12 +180,13 @@ export default {
 
     // 1: rising beams from the pillar tops, then far diagonal beams
     const rising = { [-1]: [], [1]: [] };
+    const lift = rig.proxy(0, 0, 0); // pillar height (event 9); the rising beams follow it
     for (const s of [-1, 1]) {
       for (const [x, z, top] of PILLARS) {
         for (const lean of [4, 11]) {
           const a = lean * D2R;
           const x0 = s * x;
-          rising[s].push(lights.light([{ m: barXYZ(x0, top, z, x0 + s * Math.sin(a) * 140, top + Math.cos(a) * 140, z - 10, 0.09) }], { fat: 4 }));
+          rising[s].push(lights.light([{ m: barXYZ(x0, top, z, x0 + s * Math.sin(a) * 140, top + Math.cos(a) * 140, z - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
         }
       }
     }
@@ -231,6 +235,7 @@ export default {
     });
 
     const banks = [...lights.banks, clouds, slabs];
+    let pillarsDown = false;
     return {
       root,
       banks,
@@ -240,7 +245,21 @@ export default {
         { type: 'big', objects: towers[1], step: 4 },
       ],
       lasers,
-      update() {
+      customEvents: [9],
+      onEvent(type) {
+        if (type === 9) pillarsDown = !pillarsDown; // pillar control
+      },
+      reset() {
+        pillarsDown = false;
+      },
+      update(t, dt) {
+        const target = pillarsDown ? -8 : 0;
+        const y = lift.position.y;
+        if (y !== target) {
+          lift.position.y = Math.abs(target - y) < 1e-3 ? target : y + (target - y) * (1 - Math.exp(-2.5 * dt));
+          pillars.position.y = lift.position.y;
+          pillars.updateMatrix();
+        }
         rig.sync();
         bounce();
       },

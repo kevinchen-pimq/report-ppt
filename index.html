@@ -195,6 +195,7 @@
             <h3 class="field-title">難度</h3>
             <div id="diffs" class="diffs"></div>
             <div id="diff-stats" class="muted small-text stats-line"></div>
+            <div id="diff-env" class="muted small-text stats-line"></div>
             <div class="play-row">
               <button id="play-vr" class="btn big vr" type="button" disabled>▶ 在 VR 中遊玩</button>
               <button id="play-desktop" class="btn big" type="button" disabled>▶ 電腦試玩</button>
@@ -329,6 +330,12 @@
                 <option value="translucent">半透明</option>
                 <option value="edges">只顯示邊框</option>
               </select></label>
+            <label class="select">場景
+              <select id="opt-environment">
+                <option value="auto">自動（依譜面）</option>
+                <option value="default">預設場景</option>
+              </select></label>
+            <p class="hint">「自動」會使用譜面指定的官方場景（還沒做好的場景用預設場景），也可以固定使用某個場景。下一首歌開始生效。</p>
             <details class="help small-help">
               <summary>自訂模型說明</summary>
               <p>使用 glTF 2.0（.glb，需內嵌貼圖）。光劍：最長的軸當作劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。方塊：正面朝 +Z，自動縮放置中並套用方塊顏色（名稱含 arrow / white / metal 的材質保持原色）。</p>

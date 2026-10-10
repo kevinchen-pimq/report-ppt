@@ -15,6 +15,7 @@ export const DEFAULTS = {
   rightColor: '#2a8fe0',
   useMapColors: true,
   chroma: true, // apply Chroma colours / lighting from maps
+  environment: 'auto', // 'auto' = the map's environment, 'default' = always our default, or an environment name to force it
   playerHeight: 1.8,
   spectator: null, // resolved at load time
   saberModel: 'classic', // classic | neon | katana | crystal | custom

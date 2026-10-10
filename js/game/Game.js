@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Environment } from './Environment.js';
+import { Environment, preloadEnvModule, resolveEnvironment, entryEnvironment } from './Environment.js';
 import { NoteManager } from './Notes.js';
 import { ArcManager } from './Arcs.js';
 import { Effects } from './Effects.js';
@@ -12,7 +12,7 @@ import { FpsMeter } from './FpsMeter.js';
 import { Menu } from './Menu.js';
 import { Pointers } from './ui/Pointers.js';
 import { LatencyCalibrator } from './Calibration.js';
-import { settings } from '../settings.js';
+import { settings, DEFAULTS } from '../settings.js';
 import { latestVersion } from '../beatsaver.js';
 import { parseModel, modelStore } from './Models.js';
 import { COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, laneX, layerY, noteRotation, rotationToDir, setPlayerHeight } from './constants.js';
@@ -34,6 +34,7 @@ const _ray = new THREE.Raycaster();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0.9);
 
 const hex = (c) => (typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : c);
+const hexOrNull = (c) => (c == null ? null : hex(c));
 
 /**
  * States: idle (2D page) · menu (in-VR menu) · loading · ready · playing · paused · finished
@@ -194,22 +195,32 @@ export class Game {
     this.hooks.onModelsChanged?.(this.customModels.names);
   }
 
-  /** Saber / note / light / wall colours: map colour scheme (if enabled) over the player's colours. */
+  /**
+   * Saber / note / light / wall colours, per colour (first one set wins):
+   *   1. the map's colour scheme, when "use map colours" is on
+   *   2. the player's own colours, when changed from the defaults (like Beat Saber's colour override)
+   *   3. the shown environment module's default scheme (environment-module runs only)
+   *   4. the default colours
+   */
   applyColors() {
     const s = this.settings;
     const mc = s.useMapColors && this.meta?.colors ? this.meta.colors : {};
-    const left = mc.left ?? hex(s.leftColor);
-    const right = mc.right ?? hex(s.rightColor);
-    const envLeft = mc.envLeft ?? left;
-    const envRight = mc.envRight ?? right;
+    const custom = s.leftColor !== DEFAULTS.leftColor || s.rightColor !== DEFAULTS.rightColor;
+    const ec = !custom && this.runEnv?.colors ? this.runEnv.colors : {};
+    const left = mc.left ?? hexOrNull(ec.left) ?? hex(s.leftColor);
+    const right = mc.right ?? hexOrNull(ec.right) ?? hex(s.rightColor);
+    const envLeft = mc.envLeft ?? (mc.left == null ? hexOrNull(ec.envLeft) : null) ?? left;
+    const envRight = mc.envRight ?? (mc.right == null ? hexOrNull(ec.envRight) : null) ?? right;
+    const envLeftBoost = mc.envLeftBoost ?? (mc.envLeft == null ? hexOrNull(ec.envLeftBoost) : null) ?? envLeft;
+    const envRightBoost = mc.envRightBoost ?? (mc.envRight == null ? hexOrNull(ec.envRightBoost) : null) ?? envRight;
     this.sabers[0].setColor(left);
     this.sabers[1].setColor(right);
-    this.notes.setColors(left, right, mc.obstacle ?? COLOR_WALL);
+    this.notes.setColors(left, right, mc.obstacle ?? hexOrNull(ec.wall) ?? COLOR_WALL);
     this.arcs.setColors(left, right);
     // white lights: the map's white colour only with Chroma lighting on
     const ch = this.chromaLights() && s.useMapColors ? this.meta.chroma : null;
     const white = ch?.white ?? 0xffffff;
-    this.env.setColors(envLeft, envRight, mc.envLeftBoost ?? envLeft, mc.envRightBoost ?? envRight, white, ch?.whiteBoost ?? white);
+    this.env.setColors(envLeft, envRight, envLeftBoost, envRightBoost, white, ch?.whiteBoost ?? white);
   }
 
   /** Chroma setting on and the current map lights its environment with Chroma events. */
@@ -221,6 +232,7 @@ export class Game {
   // Loading & sessions
   setMap(map, meta) {
     this.map = map;
+    this.environment = resolveEnvironment(meta.environment, this.settings.environment);
     this.meta = meta; // { title, subTitle, artist, mapper, characteristic, difficultyName, coverImage, colors }
     this.oneSaber = meta.characteristic === 'OneSaber';
   }
@@ -296,12 +308,18 @@ export class Game {
     this.state = 'loading';
     this.showPanel('loading');
     try {
+      // the environment module loads in parallel with the song
+      const early = resolveEnvironment(entryEnvironment(entry, setIdx, diffIdx), this.settings.environment);
+      if (early.module) preloadEnvModule(early.name);
       await this.library.load(entry);
       const buffer = await this.library.audioFor(entry, this.audio);
       this.audio.buffer = buffer;
       const { map, meta } = this.library.loadDifficulty(entry, setIdx, diffIdx);
       this.current = { entry, setIdx, diffIdx };
       this.setMap(map, meta);
+      // build the environment now (loading screen), never mid-song; null = our own scenery
+      this.runEnv = await this.env.prepare(this.environment.module ? this.environment.name : null, this.renderer, this.camera);
+      if (this.state !== 'loading') return; // left the loading screen meanwhile
       this.enterReady();
     } catch (e) {
       console.error(e);
@@ -403,6 +421,7 @@ export class Game {
     this.hud.setVisible(false);
     this.hud.clearPopups();
     this.env.reset([]);
+    this.runEnv = null; // menus show our own scenery and colours
     this.inWall = false;
   }
 
@@ -444,7 +463,7 @@ export class Game {
     this.arcs.chroma = chroma;
     this.notes.reset(this.map);
     this.arcs.reset(this.map);
-    this.env.reset(this.map.events, this.chromaLights() ? { environment: this.meta.environment } : null);
+    this.env.reset(this.map.events, { chroma: this.chromaLights(), environment: this.meta.environment, module: !!this.runEnv });
     this.score.reset(this.map.maxScore);
     this.effects.clear();
     this.hud.clearPopups();

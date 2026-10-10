@@ -17,7 +17,7 @@
 // Lasers: 12 / 13 spin the side lasers around the vertical axis.
 // ID order / counts source: community light-ID mapping as used by ArcViewer's Dragons recreation
 // (facts only), cross-checked against the BSMG wiki environment notes. Sizes / positions approximate.
-// Not supported by the contract: in the game the back lasers show the opposite colour.
+// As in the game, the back lasers show the opposite colour (swapColors: [0]).
 import { THREE, GEO, trs, mergeStatic, sceneryMaterials, GlowBank, PropBank, Rig, rotatingLaser, rng, boxAt, beamBetween, V } from './kit.js';
 
 // glow banks: faint halo (opacity 0.22) drawn after the cores
@@ -174,6 +174,7 @@ export default {
         { type: 'big', objects: bigRings, step: 5 },
       ],
       lasers,
+      swapColors: [0],
       update() {
         rig.update();
       },

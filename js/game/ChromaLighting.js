@@ -9,10 +9,19 @@
 //              zoom: { near, far } (metres between rings) }]
 //   lasers  { left: Object3D[], right: Object3D[] }  spun around userData.axis ('x'|'y'|'z',
 //                                      default 'z'), or through userData.setPhase(radians) if set
-//   banks   [{ update() }]             flushed once per frame after the lights were set
+//   banks   [{ update() }]             flushed once per frame after the lights were set and the
+//                                      environment's own update ran (see update())
+//   optional:
+//   swapColors   [eventType]           groups that show the opposite colour (left <-> right);
+//                                      a single light can set light.swapColor = true instead
+//   customEvents [eventType] + onEvent(type, value, event, t)
+//                                      environment-specific event types: handed to onEvent
+//                                      instead of the default handling (rings, lasers …)
+//   ring sets may set spinEvent: 9 to spin on event 9 instead of 8 (they then don't zoom)
 //
 // Light IDs: Chroma ID n addresses groups[type][n - 1]. When the environment is not the one the
 // map was made for, `counts` (official light counts per group) maps IDs proportionally instead.
+// Without Chroma (reset option chroma: false) the same runtime plays the basic events only.
 
 // Flash / fade shapes (same as the group lighting): brightness multiplier over time
 const FLASH_TIME = 0.5;
@@ -83,6 +92,18 @@ function hsvToRgb(h, s, v, out) {
 
 const isTransition = (v) => v === 4 || v === 8 || v === 12;
 const keyOf = (v) => (v >= 1 && v <= 4 ? KEY_R : v >= 5 && v <= 8 ? KEY_L : KEY_W);
+const swapKey = (k) => (k === KEY_L ? KEY_R : k === KEY_R ? KEY_L : k);
+
+// events without their Chroma data (basic lighting), cached per event list
+const basicCache = new WeakMap();
+function basicEvents(events) {
+  let out = basicCache.get(events);
+  if (!out) {
+    out = events.filter((e) => e.value < LEGACY_RGB).map((e) => (e.ch ? { time: e.time, type: e.type, value: e.value, f: e.f } : e));
+    basicCache.set(events, out);
+  }
+  return out;
+}
 const clampF = (f) => (f === undefined || f === null ? 1 : Math.max(0, Math.min(1.5, f)));
 
 /** Per-light state. */
@@ -107,6 +128,7 @@ class LightState {
     this.hsv = false;
     this.intensity = 0;
     this.dirty = true;
+    this.swap = false; // shows the opposite palette colour
   }
 }
 
@@ -128,6 +150,7 @@ class RingSet {
     this.objects = def.objects || [];
     const n = this.objects.length;
     this.big = def.type === 'big';
+    this.spinEvent = def.spinEvent === 9 ? 9 : 8;
     this.rot = new Float32Array(n);
     this.dest = new Float32Array(n);
     this.rate = new Float32Array(n);
@@ -161,13 +184,23 @@ export class ChromaLighting {
   constructor(target, colors) {
     this.colors = colors;
     this.groups = {};
+    const swapTypes = new Set((target.swapColors || []).map(Number));
     for (const [type, lights] of Object.entries(target.groups || {})) {
-      if (lights && lights.length) this.groups[type] = new GroupState(lights.map((l) => new LightState(l)));
+      if (!lights || !lights.length) continue;
+      this.groups[type] = new GroupState(lights.map((l) => {
+        const L = new LightState(l);
+        L.swap = swapTypes.has(Number(type)) || !!l.swapColor;
+        return L;
+      }));
     }
+    this.custom = new Set((target.customEvents || []).map(Number));
+    this.onEvent = typeof target.onEvent === 'function' ? target.onEvent : null;
+    this.now = 0;
     this.types = Object.keys(this.groups).map(Number).filter(isLightType).sort((a, b) => a - b);
     this.ringSets = (target.rings || []).filter((r) => r.objects && r.objects.length).map((r) => new RingSet(r));
     this.lasers = [target.lasers?.left || [], target.lasers?.right || []];
-    for (const side of this.lasers) for (const o of side) o.userData.phase0 ??= o.userData.phase ?? 0;
+    // rest angle: the given phase, else the pivot's own rotation around its spin axis
+    for (const side of this.lasers) for (const o of side) o.userData.phase0 ??= o.userData.phase ?? (o.userData.setPhase ? 0 : o.rotation[o.userData.axis || 'z']);
     this.banks = target.banks || [];
     this.laserVel = [0, 0]; // radians per second, signed
     this.boost = false;
@@ -181,11 +214,14 @@ export class ChromaLighting {
   /**
    * New run. counts: official light count per event type ({ [type]: n }) to map light IDs
    * proportionally onto our lights; omit for direct IDs (environment made for the map).
-   * startOn: { [type]: brightness } groups lit before the first event.
+   * startOn: { [type]: brightness } groups lit before the first event; startLeft: { [type]: true }
+   * those of them that start in the left colour; laserSpeed: lasers already spinning (idle).
+   * chroma: false plays the basic events only (the events' Chroma data is ignored).
    */
-  reset(events, { counts = null, startOn = {} } = {}) {
-    this.events = events || [];
+  reset(events, { counts = null, startOn = {}, startLeft = {}, laserSpeed = 0, chroma = true } = {}) {
+    this.events = chroma ? events || [] : basicEvents(events || []);
     this.eventIdx = 0;
+    this.now = -Infinity;
     this.boost = false;
     this.ringTickAcc = 0;
     this.prepare(counts);
@@ -196,7 +232,7 @@ export class ChromaLighting {
       for (const L of grp.lights) {
         L.mode = startOn[type] ? MODE_ON : MODE_OFF;
         L.k = startOn[type] || 1;
-        L.key = KEY_R;
+        L.key = startLeft[type] ? KEY_L : KEY_R;
         L.explicit = false;
         L.ease = null;
         L.trT1 = -1;
@@ -208,6 +244,13 @@ export class ChromaLighting {
     this.laserVel[0] = 0;
     this.laserVel[1] = 0;
     for (const side of this.lasers) for (const o of side) this.setLaserPhase(o, o.userData.phase0);
+    if (laserSpeed > 0) {
+      // idle: both sides spinning from spread-out angles (deterministic)
+      for (let side = 0; side < 2; side++) {
+        this.laserVel[side] = (side ? -1 : 1) * laserSpeed * LASER_DEG_PER_SPEED * DEG;
+        this.lasers[side].forEach((o, i) => this.setLaserPhase(o, o.userData.phase0 + ((i * 2.399) % (Math.PI * 2))));
+      }
+    }
   }
 
   /** Which lights each event addresses, and the transitions coming after each event. */
@@ -273,6 +316,11 @@ export class ChromaLighting {
     for (const type of this.types) for (const L of this.groups[type].lights) L.dirty = true;
   }
 
+  /** A light's palette colour (its key, swapped for lights that show the opposite colour). */
+  paletteOf(L) {
+    return this.palette(L.swap ? swapKey(L.key) : L.key);
+  }
+
   /** KEY_L | KEY_R | KEY_W -> current palette colour (with colour boost) */
   palette(key) {
     const c = this.colors;
@@ -287,6 +335,11 @@ export class ChromaLighting {
   applyEvent(e, j) {
     const type = e.type;
     if (e.value >= LEGACY_RGB) return; // Chroma 1 colour event: already folded into the later events
+    if (this.custom.has(type)) {
+      // environment-specific event (rain, tower heights, car hydraulics …)
+      this.onEvent?.(type, e.value, e, this.now);
+      return;
+    }
     if (this.groups[type] && isLightType(type)) {
       this.applyLight(e, j);
       return;
@@ -296,10 +349,11 @@ export class ChromaLighting {
       this.boost = e.value === 1;
       this.markAllDirty();
     } else if (type === 8) {
-      this.ringRotation(e, ch);
+      this.ringRotation(e, ch, 8);
     } else if (type === 9) {
+      this.ringRotation(e, ch, 9);
       for (const rs of this.ringSets) {
-        if (rs.zoomFar === null) continue;
+        if (rs.zoomFar === null || rs.spinEvent === 9) continue;
         // ring zoom: spacing between rings, game units (max step 2 = the set's far spacing)
         rs.zoomToggle = !rs.zoomToggle;
         const scale = rs.zoomFar / 2;
@@ -326,10 +380,11 @@ export class ChromaLighting {
     }
   }
 
-  ringRotation(e, ch) {
+  ringRotation(e, ch, type) {
     const right = ch && ch.dir != null ? ch.dir === 1 : rand(e) < 0.5;
     const filter = ch && typeof ch.nameFilter === 'string' ? ch.nameFilter.toLowerCase() : null;
     for (const rs of this.ringSets) {
+      if (rs.spinEvent !== type) continue;
       if (filter && !(filter.includes('big') ? rs.big : filter.includes('small') ? !rs.big : true)) continue;
       let rotation = ch?.rotation ?? 90;
       let step = ch?.step ?? rs.def.step ?? 5;
@@ -358,8 +413,8 @@ export class ChromaLighting {
   }
 
   /** Colour (and brightness) a light takes from event e: [r, g, b, k] into out (base palette for white). */
-  eventColor(e, out) {
-    const key = keyOf(e.value);
+  eventColor(e, out, swap = false) {
+    const key = swap ? swapKey(keyOf(e.value)) : keyOf(e.value);
     const f = clampF(e.f);
     if (key !== KEY_W && e.ch && e.ch.color) {
       const c = e.ch.color;
@@ -431,14 +486,14 @@ export class ChromaLighting {
       const L = lights[nx[q]];
       const ne = this.events[nx[q + 1]];
       if (ne.time <= e.time) continue;
-      this.eventColor(ne, L.to);
+      this.eventColor(ne, L.to, L.swap);
       if (mode === MODE_OFF) {
         L.from[0] = L.to[0];
         L.from[1] = L.to[1];
         L.from[2] = L.to[2];
         L.from[3] = 0;
       } else {
-        const p = L.explicit ? null : this.palette(L.key);
+        const p = L.explicit ? null : this.paletteOf(L);
         L.from[0] = p ? p.r : L.r;
         L.from[1] = p ? p.g : L.g;
         L.from[2] = p ? p.b : L.b;
@@ -470,7 +525,13 @@ export class ChromaLighting {
   // ---------------------------------------------------------------------------
   // Per frame
 
-  update(t, dt) {
+  /**
+   * Plays the events up to t, sets the lights, moves rings / lasers, then runs `envUpdate(t, dt)`
+   * (the environment's own update: it may copy pivot transforms into its banks) and finally
+   * flushes the banks once.
+   */
+  update(t, dt, envUpdate = null) {
+    this.now = t;
     const events = this.events;
     while (this.eventIdx < events.length && events[this.eventIdx].time <= t) {
       const j = this.eventIdx++;
@@ -497,8 +558,9 @@ export class ChromaLighting {
         this.evalLight(L, grp, gradActive, t, smooth);
       }
     }
-    for (let i = 0; i < this.banks.length; i++) this.banks[i].update();
     this.updateMotion(dt);
+    if (envUpdate) envUpdate(t, dt);
+    for (let i = 0; i < this.banks.length; i++) this.banks[i].update();
   }
 
   evalLight(L, grp, gradActive, t, smooth) {
@@ -544,7 +606,7 @@ export class ChromaLighting {
         g = L.g;
         b = L.b;
       } else {
-        const p = this.palette(L.key);
+        const p = this.paletteOf(L);
         r = p.r;
         g = p.g;
         b = p.b;

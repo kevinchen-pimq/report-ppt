@@ -12,9 +12,12 @@
 //                          out sideways from the ring; each one also spins (laser speed 12 / 13)
 //   1  intra-ring      20  per ring k: 2k+1 left, 2k+2 right — vertical bars on the inner sides of the ring
 //   2  left ring laser 10  per ring k: k+1 — very long vertical beam on the ring's left side
-//   3  right ring laser 10 per ring k: k+1 — same on the right
-//   4  center lights    6  1 left runway strip, 2 right runway strip, 3 chevron left arm, 4 chevron left
-//                          top bar, 5 chevron right top bar, 6 chevron right arm
+//   3  right ring laser 14 per ring k: k+1 — same on the right; 11-14 (approx.) four more beams
+//                          continuing the row behind the last ring
+//   4  center lights    8  1 left runway strip, 2 right runway strip, 3 chevron left arm, 4 chevron left
+//                          top bar, 5 chevron right top bar, 6 chevron right arm, 7 / 8 (approx.) low
+//                          bars under the chevron, left / right
+// Counts per Heck's light-ID table (20 / 20 / 10 / 14 / 8).
 // rings: big × 10 (spin + zoom). lasers: left = the 10 left side lasers, right = the 10 right ones
 // (each spins around its ring's X axis, so it sweeps a fan but never crosses the runway).
 import { THREE, GEO, trs, mergeStatic, sceneryMaterials, V, GlowBank, PropBank, Rig, strokeText, mergeAll, beamGeometry } from './kit.js';
@@ -91,6 +94,12 @@ export default {
       groups[4].push(glow.tube(V(-1.7, yTop, z), V(0, yTop, z), 0.09)); // 4 left top bar
       groups[4].push(glow.tube(V(0, yTop, z), V(1.7, yTop, z), 0.09)); // 5 right top bar
       groups[4].push(glow.tube(V(1.7, yTop, z), V(3.4, yLow, z), 0.09)); // 6 right arm
+      for (const s of [-1, 1]) groups[4].push(glow.tube(V(s * 1.2, yLow - 0.5, z), V(s * 3.4, yLow - 0.5, z), 0.06)); // 7 / 8
+    }
+    // right ring lasers 11-14: the row continues behind the last ring
+    for (let k = 0; k < 4; k++) {
+      const z = RING_Z0 - (RING_N + 1.5 + k * 1.5) * RING_DZ;
+      groups[3].push(glow.tube(V(RING_X + 0.9, RING_Y - 60, z), V(RING_X + 0.9, RING_Y + 60, z), 0.04));
     }
 
     // ---- static scenery (merged per material)
@@ -140,11 +149,13 @@ export default {
     root.add(floor);
 
     // ---- always-on TIMBALAND lettering on both sides
-    const textGeo = strokeText('TIMBALAND', 2.2, 0.3, { spacing: 1.3 });
+    // thin strokes with wide letter spacing, between the first two trusses (seen from the player, the
+    // truss legs would otherwise cross the letters) and turned toward the player so the word reads well
+    const textGeo = strokeText('TIMBALAND', 1.15, 0.13, { spacing: 2 });
     const logoParts = [];
     for (const s of [-1, 1]) {
       const g = textGeo.clone();
-      g.applyMatrix4(trs([s * 11.5, 6.0, -31], [0, -s * 1.15, 0], [1, 1, 1]));
+      g.applyMatrix4(trs([s * 6.4, 3.8, -16.5], [0, -s * 0.4, 0], [1, 1, 1]));
       logoParts.push(g);
     }
     textGeo.dispose();

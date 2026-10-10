@@ -115,19 +115,21 @@ export function buildGreenDay({ rings: withRings }) {
     }
   }
 
-  // ---------------- center lights (group 4)
-  // 1: GREEN DAY logo high above the far runway (one light, its own 1-instance bank)
+  // ---------------- center lights (group 4): logo, beam bundles L / R, heart grenade, drips
+  // (Grenade: 5 IDs in that order; Green Day: 3 IDs = logo, both bundles, heart + drips)
+  const center = [];
+  // GREEN DAY logo high above the far runway (one light, its own 1-instance bank)
   const logoGeo = strokeText('GREEN DAY', 1.5, 0.2, { spacing: 1.2 });
   logoGeo.translate(0, 7.5, -64);
   const logoBank = new LightBank(root, logoGeo, 1);
-  groups[4].push(new MultiLight([logoBank.add(new THREE.Matrix4())]));
+  center.push(new MultiLight([logoBank.add(new THREE.Matrix4())]));
   banks.push(logoBank);
   owned.push(logoGeo, logoBank.mesh.material);
   // 2 / 3: two bundles of vertical beams either side of the far runway
   for (const s of [-1, 1]) {
     const segs = [];
     for (let k = 0; k < 4; k++) segs.push([V(s * (2.4 + k * 0.28), -20, -38 - k * 0.6), V(s * (2.4 + k * 0.28), 90, -38 - k * 0.6)]);
-    groups[4].push(multi(segs, 0.035));
+    center.push(multi(segs, 0.035));
   }
   // 4: heart grenade outline, 5: the drips below it — held by a raised arm, left of the runway
   const H = { x: -3.6, y: 6.6, z: -28, k: 0.12 };
@@ -140,11 +142,12 @@ export function buildGreenDay({ rings: withRings }) {
     segs.push([V(H.x + 0.2, H.y + 1.0, H.z), V(H.x + 0.9, H.y + 1.6, H.z)], [V(H.x + 0.9, H.y + 1.6, H.z), V(H.x + 1.4, H.y + 0.6, H.z)]);
     // a few inner highlight strokes
     segs.push([V(H.x - 0.9, H.y + 0.2, H.z), V(H.x - 0.2, H.y - 0.5, H.z)], [V(H.x + 0.3, H.y + 0.4, H.z), V(H.x + 0.9, H.y - 0.1, H.z)]);
-    groups[4].push(multi(segs, 0.06));
+    center.push(multi(segs, 0.06));
     const drips = [];
     for (const [dx, len] of [[-0.6, 1.4], [-0.15, 2.2], [0.35, 1.1], [0.75, 1.7]]) drips.push([V(H.x + dx, H.y - 0.6, H.z + 0.05), V(H.x + dx, H.y - 0.6 - len, H.z + 0.05)]);
-    groups[4].push(multi(drips, 0.07));
+    center.push(multi(drips, 0.07));
   }
+  groups[4] = withRings ? [center[0], new MultiLight([center[1], center[2]]), new MultiLight([center[3], center[4]])] : center;
   // the arm itself (static, dark) — forearm rising from below, fist gripping the heart
   const arm = [];
   arm.push(beamGeometry(V(-6.2, -4, -27.2), V(-4.3, 4.6, -28.4), 1.3, 1.3, box));
@@ -157,7 +160,7 @@ export function buildGreenDay({ rings: withRings }) {
     // rings: square frames down the far runway, a solid light bar at top and bottom of each
     const frameMat = skinMat;
     const props = new PropBank(root, GEO.box, frameMat, RING_N * 4);
-    const bars = new LightBank(root, GEO.box, RING_N * 2);
+    const bars = new LightBank(root, GEO.box, RING_N * 6);
     banks.push(props, bars);
     const half = 6;
     for (let k = 0; k < RING_N; k++) {
@@ -170,25 +173,27 @@ export function buildGreenDay({ rings: withRings }) {
         trs([Math.cos(a) * half, Math.sin(a) * half, 0], [0, 0, a], [0.5, half * 2 + 0.5, 0.5], m);
         rig.attach(ring, props, m);
       }
+      // top bar then bottom bar, each in 3 segments (left → right): 6 lights per ring
       for (const sy of [1, -1]) {
-        trs([0, sy * (half - 0.45), 0.3], [0, 0, 0], [2.4, 0.32, 0.4], m);
-        groups[1].push(rig.light(ring, bars, m));
+        for (const sx of [-1, 0, 1]) {
+          trs([sx * 0.82, sy * (half - 0.45), 0.3], [0, 0, 0], [0.74, 0.32, 0.4], m);
+          groups[1].push(rig.light(ring, bars, m));
+        }
       }
     }
   } else {
-    // Grenade "ambiance": window bands on the buildings closest to the runway, left (1) and right (2)
+    // Grenade "ambiance": window bands on the buildings closest to the runway, one light each:
+    // 1-30 left (near → far, 3 floors each, bottom → top), 31-60 right
     const win = new LightBank(root, GEO.plane, 64, { material: lightMaterial({ opacity: 0.55 }) });
     banks.push(win);
     for (const s of [-1, 1]) {
-      const list = [];
-      for (let i = 0; i < 9; i++) {
-        const z = -20 - i * 9;
+      for (let i = 0; i < 10; i++) {
+        const z = -20 - i * 8.2;
         for (let r = 0; r < 3; r++) {
           const y = 4 + r * 4.5 + (i % 2) * 1.5;
-          list.push(win.add(trs([s * 13.8, y, z], [0, -s * Math.PI / 2, 0], [5, 0.6, 1])));
+          groups[1].push(win.add(trs([s * 13.8, y, z], [0, -s * Math.PI / 2, 0], [4.6, 0.6, 1])));
         }
       }
-      groups[1].push(new MultiLight(list));
     }
   }
 

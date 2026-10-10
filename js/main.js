@@ -1,4 +1,5 @@
 import { Game } from './game/Game.js';
+import { ENV_MODULES, environmentText, preloadEnvModule, resolveEnvironment } from './game/Environment.js';
 import { settings, DEFAULTS } from './settings.js';
 import { Library, diffName, defaultSetIndex, mapStats } from './library.js';
 import { searchMaps, mapById, latestVersion, download, searchPlaylists, parsePlaylistId } from './beatsaver.js';
@@ -98,7 +99,14 @@ $('now-cover').addEventListener('click', (ev) => {
 // ---------------------------------------------------------------------------
 // Settings (shared with the in-VR menu through the settings store)
 const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'chroma', 'saberFlip', 'showWalls', 'showBombs', 'showDebris', 'showFps'];
-const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle'];
+const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle', 'environment'];
+// scene choices: auto / default (in the markup), then every environment that has a module
+for (const { name, label } of ENV_MODULES) {
+  const o = document.createElement('option');
+  o.value = name;
+  o.textContent = label;
+  $('opt-environment').append(o);
+}
 const RANGES_UI = {
   playerHeight: (v) => `${Number(v).toFixed(2)} m`,
   audioLatencyMs: (v) => `${v > 0 ? '+' : ''}${v} ms`,
@@ -115,6 +123,7 @@ function syncSettingsUI(v) {
     $(`out-${k}`).textContent = fmt(v[k]);
   }
   for (const k of SELECTS) $(`opt-${k}`).value = v[k];
+  if ($('opt-environment').selectedIndex < 0) $('opt-environment').value = 'auto'; // unknown saved value
   $('opt-refreshRate').value = String(v.refreshRate || 0);
   $('opt-leftColor').value = v.leftColor;
   $('opt-rightColor').value = v.rightColor;
@@ -128,6 +137,7 @@ stylePreview.update(settings.all);
 settings.subscribe((v) => {
   syncSettingsUI(v);
   stylePreview.update(v);
+  syncEnvLine();
 });
 for (const k of CHECKS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.checked }));
 for (const k of Object.keys(RANGES_UI)) $(`opt-${k}`).addEventListener('input', (e) => settings.set({ [k]: Number(e.target.value) }));
@@ -967,7 +977,20 @@ function previewDiff() {
     current.preview = null;
     $('diff-stats').textContent = `難度解析失敗：${e.message}`;
   }
+  syncEnvLine();
   updateButtons();
+}
+
+/** Song page: the environment the selected difficulty will be shown in (and start loading it). */
+function syncEnvLine() {
+  const el = $('diff-env');
+  if (!el) return;
+  const meta = current?.preview?.meta;
+  el.textContent = meta ? environmentText(meta.environment, settings.get('environment')) : '';
+  if (meta) {
+    const r = resolveEnvironment(meta.environment, settings.get('environment'));
+    if (r.module) preloadEnvModule(r.name);
+  }
 }
 
 function updateButtons() {

@@ -20,8 +20,8 @@
 //   7  extra right lasers .............. 24  (mirror of 6)
 // Counts: Chroma's light ID table for SkrillexEnvironment (Aeroluna/Heck). Order, layout and
 // rough positions: ChroMapper's community recreation (facts only); ring size: approximate.
-// Rings: 'big' = primary rings (event 8 spin), 'small' = secondary rings (spin; the official
-// environment spins them on event 9 together with a laser mode, there is no ring zoom).
+// Rings: 'big' = primary rings (event 8 spin), 'small' = secondary rings (spinEvent 9: they spin on
+// event 9, like the official environment; no ring zoom).
 // Lasers: event 12 / 13 speed drives the 20 moving bars per side up and down.
 import { THREE, LightBank, GEO, GlowBank, Rig, PropBank, MultiLight, barXYZ, stdMat } from './kit.js';
 
@@ -174,7 +174,7 @@ export default {
       groups,
       rings: [
         { type: 'big', objects: primary, step: 8 },
-        { type: 'small', objects: secondary, step: 8 },
+        { type: 'small', objects: secondary, step: 8, spinEvent: 9 },
       ],
       lasers,
       update() {

@@ -11,10 +11,12 @@
 // ChroMapper (reference only: which group drives what, rough positions and per-group order).
 //   0  bottom lights 16  stage outlines: 1-4 left upper level (near, outer, far, inner edge),
 //                        5-8 left lower level, 9-12 right upper (near, inner, far, outer), 13-16 right lower
-//   1  ring lights   20  ring k (front → back): 2k+1 top bar, 2k+2 bottom bar
+//   1  ring lights   60  ring k (front → back): 6k+1..6k+3 top bar segments (left → right),
+//                        6k+4..6k+6 bottom bar segments
 //   2  left lasers    6  laser fan high up on the left, inner → outer
 //   3  right lasers   6  same on the right
-//   4  center lights  5  1 GREEN DAY logo, 2 / 3 vertical beam bundles L / R, 4 heart grenade, 5 its drips
+//   4  center lights  3  1 GREEN DAY logo, 2 both vertical beam bundles, 3 heart grenade + its drips
+// (counts per Heck's light-ID table; which object has which ID: approximate)
 // rings: big × 10 (spin + zoom). lasers: 6 + 6 (spin around Z at their emitters).
 import { buildGreenDay, GREEN_DAY_COLORS } from './_greenDay.js';
 

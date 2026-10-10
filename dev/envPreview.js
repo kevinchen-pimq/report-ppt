@@ -1,7 +1,7 @@
 // Dev-only preview of an environment module (js/game/envs/<name>.js) with a simple
 // v2 lighting driver. Not deployed. Query: ?env=<Name>&pattern=<p>&cam=<c>&t=<seconds>
 //   pattern: all | groups | chase | rings | lasers | cycle (default cycle)
-//   cam: player | orbit | side | top (default player); t: freeze the clock (for screenshots)
+//   cam: player | orbit | side | top (default player), or pos=x,y,z&look=x,y,z; t: freeze the clock
 import * as THREE from 'three';
 
 const q = new URLSearchParams(location.search);
@@ -30,7 +30,9 @@ const cams = {
   side: [[22, 4, -14], [0, 4, -16]],
   top: [[0, 60, -18], [0, 0, -19]],
 };
-const [cp, ct] = cams[CAM] || cams.player;
+// custom camera: &pos=x,y,z&look=x,y,z
+if (q.has('pos')) cams.custom = [q.get('pos').split(',').map(Number), (q.get('look') || '0,1.5,-20').split(',').map(Number)];
+const [cp, ct] = cams[q.has('pos') ? 'custom' : CAM] || cams.player;
 camera.position.set(...cp);
 camera.lookAt(...ct);
 addEventListener('resize', () => {

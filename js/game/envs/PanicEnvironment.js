@@ -12,8 +12,9 @@
 //                         61 left pillar laser, 62 right pillar laser
 //   2 left lasers   (7):  near -> far
 //   3 right lasers  (7):  near -> far
-//   4 center        (6):  1 left window, 2 right window, 3 left / 4 right window frame (approximate:
-//                         not in our source mapping), 5 left track laser, 6 right track laser
+//   4 center        (8):  1 left window, 2 right window, 3 left / 4 right window frame (approximate:
+//                         not in our source mapping), 5 left track laser, 6 right track laser,
+//                         7 left / 8 right window sill strip (approximate)
 // Rings: 30 small rings, event 8 spins them (5° step), event 9 zooms 0.25 m <-> 1.5 m.
 // Lasers: 12 / 13 spin the side lasers around the vertical axis.
 // ID order / counts source: community light-ID mapping as used by ArcViewer's Panic recreation
@@ -182,6 +183,7 @@ export default {
     }
     for (const m of winM) groups[4].push(frameBank.add(m.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, 0.02))));
     for (const s of [-1, 1]) groups[4].push(tubes.tube(V(s * 0.6, 0.01, -40), V(s * 0.6, 0.01, -260), 0.035, 3.5));
+    for (const s of [-1, 1]) groups[4].push(tubes.tube(V(s * 0.7, 3.15, -53.0), V(s * 2.8, 3.15, -53.0), 0.05, 3.5));
 
     rig.update(true);
     const banks = [...tubes.banks, ...bars.banks, ringBodies, glassBank, glowBank, frameBank];

@@ -6,6 +6,7 @@ import { diffName, defaultSetIndex, mapStats } from '../library.js';
 import { downloads } from '../downloads.js';
 import { DIFF_NAMES } from '../mapLoader.js';
 import { SABER_STYLES, NOTE_STYLES, WALL_STYLES, buildSaberVisual } from './Models.js';
+import { ENV_MODULES, envLabel, preloadEnvModule, environmentText, resolveEnvironment } from './Environment.js';
 
 const DIFF_COLORS = { Easy: '#4cdf8f', Normal: '#59b0f4', Hard: '#ff9d3a', Expert: '#ff4d5e', ExpertPlus: '#c46cff' };
 const SORTS = [
@@ -786,6 +787,9 @@ export class Menu {
     try {
       s.preview = this.library.loadDifficulty(s.entry, s.setIdx, s.diffIdx);
       s.error = '';
+      // start loading the environment this difficulty uses
+      const env = resolveEnvironment(s.preview.meta.environment, settings.get('environment'));
+      if (env.module) preloadEnvModule(env.name);
     } catch (e) {
       s.preview = null;
       s.error = e.message;
@@ -830,6 +834,7 @@ export class Menu {
       });
     });
     if (s.preview) {
+      p.text(environmentText(s.preview.meta.environment, settings.get('environment')), CX, 456, { size: 24, color: THEME.muted, maxWidth: CW });
       const m = s.preview.map;
       const st = mapStats(m);
       p.text(`方塊 ${m.colorNotes} · 鏈 ${m.links} · 弧線 ${m.arcs.length} · 炸彈 ${st.bombs} · 牆 ${m.walls.length}`, CX, 480, { size: 26, color: THEME.muted });
@@ -953,10 +958,33 @@ export class Menu {
     this.chipRow(p, 'ap-note', 260, '方塊', NOTE_STYLES, s.noteModel, (v) => settings.set({ noteModel: v }), (v) => v === 'custom' && !g.customModels.note);
     if (names.note) p.text(`自訂方塊：${names.note}`, CX + 150, 360, { size: 22, color: THEME.muted, maxWidth: 520 });
     this.chipRow(p, 'ap-wall', 410, '牆壁', WALL_STYLES, s.wallStyle, (v) => settings.set({ wallStyle: v }));
-    p.text('自訂模型：在網頁的「外觀」區上傳 glTF 2.0（.glb）檔，會保存在這個瀏覽器中。', CX, 545, { size: 24, color: THEME.muted, maxWidth: CW });
-    p.text('光劍：最長的軸會當成劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。', CX, 585, { size: 22, color: THEME.muted, maxWidth: CW });
-    p.text('方塊：模型正面朝 +Z，會自動縮放置中並套用方塊顏色。', CX, 620, { size: 22, color: THEME.muted, maxWidth: CW });
-    p.text('變更立即套用；遊戲中途變更則在下一首歌開始時生效', CX, 670, { size: 22, color: THEME.accent });
+    this.environmentRow(p, 500, s.environment || 'auto');
+    p.text('自訂模型：在網頁的「外觀」區上傳 glTF 2.0（.glb）檔，會保存在這個瀏覽器中。', CX, 625, { size: 24, color: THEME.muted, maxWidth: CW });
+    p.text('光劍：最長的軸會當成劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。', CX, 662, { size: 22, color: THEME.muted, maxWidth: CW });
+    p.text('方塊：模型正面朝 +Z，會自動縮放置中並套用方塊顏色。', CX, 694, { size: 22, color: THEME.muted, maxWidth: CW });
+    p.text('變更立即套用；遊戲中途變更則在下一首歌開始時生效', CX, 735, { size: 22, color: THEME.accent });
+  }
+
+  /** Scene chooser: auto (the map's environment) / our default / ◀ one environment ▶. */
+  environmentRow(p, y, cur) {
+    p.text('場景', CX, y + 42, { size: 30, weight: 700 });
+    p.button('ap-env-auto', CX + 150, y, 190, 64, '自動（依譜面）', { size: 22, active: cur === 'auto', onClick: () => settings.set({ environment: 'auto' }) });
+    p.button('ap-env-default', CX + 350, y, 150, 64, '預設場景', { size: 22, active: cur === 'default', onClick: () => settings.set({ environment: 'default' }) });
+    const idx = ENV_MODULES.findIndex((m) => m.name === cur);
+    const pick = (d) => {
+      const n = ENV_MODULES.length;
+      const i = idx < 0 ? (d > 0 ? 0 : n - 1) : (idx + d + n) % n;
+      settings.set({ environment: ENV_MODULES[i].name });
+    };
+    p.button('ap-env-prev', CX + 510, y, 64, 64, '◀', { size: 26, onClick: () => pick(-1) });
+    p.button('ap-env-name', CX + 582, y, 290, 64, idx >= 0 ? envLabel(cur) : '固定一個場景', {
+      size: 22,
+      active: idx >= 0,
+      onClick: () => (idx >= 0 ? null : pick(1)),
+    });
+    p.button('ap-env-next', CX + 880, y, 64, 64, '▶', { size: 26, onClick: () => pick(1) });
+    p.text(cur === 'auto' ? '使用譜面指定的官方場景（還沒做好的用預設場景）' : cur === 'default' ? '每首歌都用預設場景' : `每首歌都用「${envLabel(cur)}」場景`,
+      CX + 150, y + 98, { size: 22, color: THEME.muted, maxWidth: CW - 150 });
   }
 
   // ----- calibration ------------------------------------------------------------

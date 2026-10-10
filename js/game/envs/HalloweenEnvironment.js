@@ -5,7 +5,7 @@
 //
 // Light groups (v2 basic event type → lights, in light-ID order; Chroma lightID n = index n-1):
 //   0  sky lasers   4: left outer, left inner, right inner, right outer (long beams above the track)
-//   1  moon         1 (disc + halo)
+//   1  moon         3: 1 disc, 2 halo, 3 wide outer glow
 //   2  left lasers  18: outermost (x ≈ -86) → innermost (x ≈ -22), behind the castle; spin (event 12)
 //   3  right lasers 18: outermost (x ≈ +86) → innermost; spin (event 13)
 //   4  walkway      3: left lane strip, right lane strip, castle interior (windows + gate)
@@ -205,12 +205,13 @@ export default {
     const haloGeo = glowDiscGeometry(24, 0.05, 1);
     owned.push(discGeo, haloGeo);
     const moonBank = new LightBank(root, discGeo, 1, { material: softLightMaterial() });
-    const haloBank = new LightBank(root, haloGeo, 1, { material: softLightMaterial({ opacity: 0.55 }) });
+    const haloBank = new LightBank(root, haloGeo, 2, { material: softLightMaterial({ opacity: 0.55 }) });
     banks.push(moonBank, haloBank);
-    groups[1].push(new MultiLight([
+    groups[1].push(
       moonBank.add(trs([-26, 46, -168], [0, 0.15, 0], [8, 8, 1])),
-      haloBank.add(trs([-26, 46, -168.5], [0, 0.15, 0], [30, 30, 1])),
-    ], [1, 0.6]));
+      new MultiLight([haloBank.add(trs([-26, 46, -168.5], [0, 0.15, 0], [30, 30, 1]))], [0.6]),
+      new MultiLight([haloBank.add(trs([-26, 46, -169], [0, 0.15, 0], [62, 62, 1]))], [0.22]),
+    );
 
     // 2 / 3: two rows of searchlight lasers behind the castle, leaning towards the centre so the
     // rows cross over the walkway; laser speed spins each beam around the vertical (a cone sweep)

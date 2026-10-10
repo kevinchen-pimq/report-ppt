@@ -18,16 +18,22 @@
 // additional tower lights) and the light layout of ChroMapper's community Gaga platform (read for
 // facts only: which tower each event drives, 3 glowing discs + 1 lightning per tower, 4 runway
 // bars in groups 2/3). The order inside each group is approximate (no official ID list found).
-// Not handled: tower coil heights (events 12/13 and 16-19 in this environment) — the coil discs
-// stay at a fixed height; the contract's laser-speed objects are not used here.
+// Environment events (customEvents): 12 / 13 / 16 / 17 / 18 / 19 set the coil height of tower
+// 3 / 4 / 2 / 5 / 1 / 6 (value 0 = low … 8 = high, approximate); the coil disc glides there. The
+// lightning bolts stay where they are. There are no laser-speed objects in this environment.
+// Heck's light-ID table has no entry for Lady Gaga (counts above are our own).
 // Default colours: Beat Saber Lady Gaga scheme (as listed by ArcViewer / ChroMapper / BSMG wiki).
 import {
-  THREE, LightBank, MeshLight, MultiLight, GEO, V, rng, tubeMatrix, trs, mergeStatic, lightMaterial,
+  THREE, LightBank, MeshLight, MultiLight, PropBank, GEO, V, rng, tubeMatrix, trs, mergeStatic, lightMaterial,
   softLightMaterial, glowDiscGeometry, skyDome, ridgeGeometry,
 } from './kit.js';
 
 const FLOOR_Y = -3;
 const LOGO = V(0, 6.5, -74);
+// coil height events -> tower (index into TOWERS); coil height range (m)
+const COIL_OF_EVENT = { 18: 0, 16: 1, 12: 2, 13: 3, 17: 4, 19: 5 };
+const COIL_LOW = 6;
+const COIL_HIGH = 24;
 
 /** Aurora curtain: a folded ribbon of vertical rays, bright at the hem, fading upwards. */
 function auroraGeometry(rand, { x0, x1, z, depth, y0, height, cols, phase }) {
@@ -155,7 +161,7 @@ export default {
         putTube(V(x + dx * 1.6, FLOOR_Y, z + dz * 1.6), V(x + dx, 31, z + dz), 0.14);
       }
       for (let y = 4; y < 31; y += 4.5) put(cyl, [x, y, z], null, [1.15, 0.18, 1.15]);
-      for (const [y, r] of [...DISCS, COIL]) put(cyl, [x, y, z], null, [r, 0.35, r]);
+      for (const [y, r] of DISCS) put(cyl, [x, y, z], null, [r, 0.35, r]);
       put(cyl, [x, FLOOR_Y + 0.5, z], null, [2.6, 1, 2.6]);
     }
     const metal = mergeStatic(parts, metalMat);
@@ -166,6 +172,11 @@ export default {
     // ---- lights ---------------------------------------------------------------------------
     const groups = { 0: [], 1: [], 2: [], 3: [], 4: [], 6: [], 7: [], 10: [], 11: [] };
     const banks = [];
+    const coilGeo = new THREE.CylinderGeometry(1, 1, 1, 12, 1, false);
+    owned.push(coilGeo);
+    const coilBodies = new PropBank(root, coilGeo, metalMat, 6);
+    banks.push(coilBodies);
+    const coils = [];
 
     // 0 / 1: aurora curtains (one mesh each; vertex colours shape the rays)
     for (const [type, opts] of [
@@ -228,6 +239,8 @@ export default {
       const fork = bolt(forkFrom, forkFrom.clone().add(V(-s * 3, -4, -4)), 3, 1.5);
       const coil = rimBank.add(trs([x, COIL[0] + 0.18, z], [Math.PI / 2, 0, 0], [COIL[1], COIL[1], 1]));
       lights.push(new MultiLight([...main, ...fork, coil]));
+      // the coil disc moves (events 12 / 13 / 16-19): its body is an instance, its rim a light
+      coils.push({ x, z, type, rim: coil.index, body: coilBodies.add(trs([x, COIL[0], z], [0, 0, 0], [COIL[1], 0.35, COIL[1]])), y: COIL[0], target: COIL[0] });
       groups[type].push(...lights);
     }
     // groups 2 / 3: small vertical bars beside the runway piers (near pair, far pair)
@@ -254,6 +267,24 @@ export default {
       groups,
       rings: [],
       lasers: { left: [], right: [] },
+      customEvents: [12, 13, 16, 17, 18, 19],
+      onEvent(type, value) {
+        const c = coils[COIL_OF_EVENT[type]];
+        if (c) c.target = COIL_LOW + (COIL_HIGH - COIL_LOW) * Math.max(0, Math.min(8, value)) / 8;
+      },
+      reset() {
+        for (const c of coils) c.target = COIL[0];
+      },
+      update(t, dt) {
+        const k = 1 - Math.exp(-3 * dt);
+        for (const c of coils) {
+          if (Math.abs(c.target - c.y) < 1e-3) continue;
+          c.y += (c.target - c.y) * k;
+          if (Math.abs(c.target - c.y) < 1e-3) c.y = c.target;
+          coilBodies.setMatrix(c.body, trs([c.x, c.y, c.z], [0, 0, 0], [COIL[1], 0.35, COIL[1]], m4));
+          rimBank.setMatrix(c.rim, trs([c.x, c.y + 0.18, c.z], [Math.PI / 2, 0, 0], [COIL[1], COIL[1], 1], m4));
+        }
+      },
       dispose() {
         for (const b of banks) b.dispose();
         for (const o of owned) o.dispose();

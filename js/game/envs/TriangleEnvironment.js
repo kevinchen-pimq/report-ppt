@@ -10,8 +10,8 @@
 //      9 front tower strip, 10 rear tower strip, 11 approx: tower crossbar strip.
 //   3  right lasers (11): 1-7 rotating, 8 glow wire, 9 front tower strip, 10 approx: crossbar strip,
 //      11 rear tower strip (ArcViewer has 9 and 11 for the right strips).
-//   4  center lights (11): 1-10 lasers from the far track edges up into the sky, crossing over the track
-//      (an "X"); odd = left, near → far; 11 approx: neon line under the track centre.
+//   4  center lights (12): 1-10 lasers from the far track edges up into the sky, crossing over the track
+//      (an "X"); odd = left, near → far; 11 / 12 approx: neon lines under the track (left / right).
 // Rings: 15 big lit diamond rings (event 8, step 5°) and 30 small dark triangle rings (event 8 spin, 7° step;
 // event 9 zoom 5 ↔ 10 m).
 // Lasers 12 / 13: the 7 + 7 rotating lasers (cone sweep around the vertical).
@@ -52,7 +52,7 @@ export default {
     }
 
     groups[4] = trackLasers(kit, { n: 5, emitX: -4, y0: -1, z0: 36, dz: 15, dir: [0.259, 0.74, 0.621], len: 420, width: 1.3, leftFirst: true });
-    groups[4].push(kit.line(U(0, -2.3, 6), U(0, -2.3, 300), 0.5));
+    for (const s of [-1, 1]) groups[4].push(kit.line(U(s * 0.6, -2.3, 6), U(s * 0.6, -2.3, 300), 0.5));
 
     return kit.finish({
       groups,

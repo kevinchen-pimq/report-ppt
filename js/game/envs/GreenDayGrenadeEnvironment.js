@@ -9,7 +9,8 @@
 // ChroMapper (reference only).
 //   0  bottom lights 16  stage outlines: 1-4 left upper level (near, outer, far, inner edge),
 //                        5-8 left lower level, 9-12 right upper (near, inner, far, outer), 13-16 right lower
-//   1  ambiance       2  1 left building windows, 2 right building windows
+//   1  ambiance      60  building windows: 1-30 left (near → far, 3 floors each, bottom → top), 31-60 right
+// (counts per Heck's light-ID table; which object has which ID: approximate)
 //   2  left lasers    6  laser fan high up on the left, inner → outer
 //   3  right lasers   6  same on the right
 //   4  center lights  5  1 GREEN DAY logo, 2 / 3 vertical beam bundles L / R, 4 heart grenade, 5 its drips

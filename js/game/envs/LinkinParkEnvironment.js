@@ -16,7 +16,8 @@
 // Counts: Chroma's light ID table for LinkinParkEnvironment (Aeroluna/Heck). Order and rough
 // positions: ArcViewer's community recreation (facts only). Ceiling bar pair order: approximate.
 // Event 12 / 13 (laser speed) spin each tunnel laser line around the tunnel axis (one pivot each,
-// random phase). No rings (event 8 "laser mode" is not modelled by the contract).
+// random phase). No rings. Environment event (customEvents) 8 = laser mode: the tunnel laser lines
+// glide between their wide circle (radius 2.5 m) and a tight one around the track (1.75 m).
 import { THREE, GEO, GlowBank, Rig, MultiLight, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const TUNNEL_R = 3.8; // half width of the tunnel = radius of the arch
@@ -115,6 +116,7 @@ export default {
 
     // 2 / 3: 18 tunnel laser lines per side (each its own pivot around the tunnel axis) + 2 wires
     const lasers = { left: [], right: [] };
+    const tunnel = []; // the 36 laser-line pivots (laser mode scales them)
     for (const [type, s, list] of [[2, -1, lasers.left], [3, 1, lasers.right]]) {
       for (let i = 0; i < 18; i++) {
         const a = THREE.MathUtils.degToRad(s < 0 ? 180 - 5 * i : 5 * i);
@@ -123,6 +125,7 @@ export default {
         const y = Math.sin(a) * LASER_R;
         groups[type].push(lights.light([{ m: barXYZ(x, y, NEAR, x, y, FAR + 1, 0.03) }], { fat: 2.4, glowGain: 0.8, rig, proxy: p }));
         list.push(p);
+        tunnel.push(p);
       }
       for (const [x, y] of [[2.3, 3.75], [2.65, 3.4]]) {
         groups[type].push(lights.light([{ m: barXYZ(s * x, y, NEAR, s * x, y, FAR + 1, 0.05) }], { fat: 3 }));
@@ -160,13 +163,28 @@ export default {
     });
 
     const banks = lights.banks;
+    let mode = 0;
+    let scale = 1;
     return {
       root,
       banks,
       groups,
       rings: [],
       lasers,
-      update() {
+      customEvents: [8],
+      onEvent(type) {
+        if (type === 8) mode = 1 - mode; // laser mode
+      },
+      reset() {
+        mode = 0;
+      },
+      update(t, dt) {
+        const target = mode ? 0.7 : 1;
+        if (scale !== target) {
+          scale += (target - scale) * (1 - Math.exp(-6 * dt));
+          if (Math.abs(target - scale) < 1e-3) scale = target;
+          for (let i = 0; i < tunnel.length; i++) tunnel[i].scale.set(scale, scale, 1);
+        }
         rig.sync();
         bounce();
       },

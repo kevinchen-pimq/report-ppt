@@ -15,7 +15,8 @@
 //   4 center        (14): 1 left emblem, 2 right emblem, 3 / 5 left tower bars, 4 / 6 right tower bars,
 //                         7 / 8 left / right far tower bar (approximate: not in our source mapping),
 //                         9 left outer wire, 10 left track wire, 11 right track wire, 12 right outer wire,
-//                         13 chevron right stroke, 14 chevron left stroke
+//                         13 chevron right stroke, 14 chevron left stroke,
+//                         15 (Monstercat only, approximate) glow bar along the front of the track
 // Rings: 20 small ring frames, event 8 spins them (no zoom in this environment).
 // Lasers: 12 / 13 spin the side lasers around the vertical axis.
 // ID order / counts source: community light-ID mapping as used by ArcViewer's Monstercat recreation
@@ -51,7 +52,8 @@ function emblemGeometry(width) {
   return merged;
 }
 
-export function buildMonstercat() {
+/** opts.frontBar: the 15th center light (Monstercat has 15, Crab Rave 14). */
+export function buildMonstercat({ frontBar = false } = {}) {
   const root = new THREE.Group();
   const mats = sceneryMaterials();
   const owned = [];
@@ -177,6 +179,7 @@ export function buildMonstercat() {
     const left = tubes.tube(c.clone().sub(d), c.clone().add(V(0, 0.02, 0)), 0.12, 4);
     groups[4].push(right, left);
   }
+  if (frontBar) groups[4].push(tubes.tube(V(-3.9, -0.2, -6.3), V(3.9, -0.2, -6.3), 0.05, 3.5));
 
   rig.update(true);
   const banks = [...tubes.banks, embBank, embHaloBank, ringBodies];

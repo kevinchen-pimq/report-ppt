@@ -14,9 +14,9 @@
 //   7  right lasers ............ 7  (same, right side, speed event 13)
 // Counts: Chroma's light ID table for InterscopeEnvironment (Aeroluna/Heck). Gate ↔ event type
 // assignment, the in-gate order and rough positions: ChroMapper's community recreation (facts
-// only). Laser placement/motion: approximate. Car hydraulics (events 8 / 16 / 17) are not
-// modelled (no contract hook); cars are static.
-import { THREE, GEO, GlowBank, Rig, MultiLight, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
+// only). Laser placement/motion: approximate. Environment events (customEvents), car hydraulics:
+// 16 / 17 raise (value > 0) or lower (0) the cars on the left / right, 8 makes every car hop.
+import { THREE, GEO, GlowBank, Rig, MultiLight, PropBank, barXYZ, wash, stdMat, mergeGeos, mergeAll } from './kit.js';
 
 const GATE_Z = [-7.9, -17.9, -27.9, -37.9, -47.9];
 // which gate (index into GATE_Z) each event type lights
@@ -142,15 +142,29 @@ export default {
     owned.push(marks.geometry);
 
     // cars (between the gates, nose angled toward the track)
+    // one car shape, 8 instances (hydraulics move them: events 8 / 16 / 17)
+    const carParts = [];
+    carGeos(0, 0, 0, carParts);
+    const carGeo = mergeAll(carParts);
+    owned.push(carGeo);
+    const carBank = new PropBank(root, carGeo, carMat, 8);
     const cars = [];
     const yaw = Math.atan2(-0.34, 0.94); // nose toward +X (track) and slightly toward the player
+    const cm = new THREE.Matrix4();
+    const tilt = new THREE.Matrix4();
+    const pose = (c) => {
+      // lift: whole car up, nose (+X) tilted up a little; hop: extra bounce
+      cm.makeRotationY(c.yaw).multiply(tilt.makeRotationZ(c.lift * 0.3));
+      cm.setPosition(c.x, c.lift + c.hop, c.z);
+      carBank.setMatrix(c.index, cm);
+    };
     for (const [x, z] of [[4.6, -12.4], [4.6, -22.4], [5.1, -32.4], [5.1, -42.4]]) {
-      carGeos(-x, z, yaw, cars);
-      carGeos(x, z, Math.PI - yaw, cars);
+      for (const [cx, cyaw, side] of [[-x, yaw, 0], [x, Math.PI - yaw, 1]]) {
+        const c = { x: cx, z, yaw: cyaw, side, index: carBank.add(cm), lift: 0, target: 0, hop: 0, vel: 0 };
+        pose(c);
+        cars.push(c);
+      }
     }
-    const carMesh = mergeGeos(cars, carMat);
-    root.add(carMesh);
-    owned.push(carMesh.geometry);
 
     // ---- lights -----------------------------------------------------------------------------
     const lights = new GlowBank(root, GEO.box, 64, { haloOpacity: 0.22 });
@@ -191,11 +205,37 @@ export default {
 
     return {
       root,
-      banks: lights.banks,
+      banks: [...lights.banks, carBank],
       groups,
       rings: [],
       lasers,
-      update() {
+      customEvents: [8, 16, 17],
+      onEvent(type, value) {
+        for (const c of cars) {
+          if (type === 8) c.vel = Math.max(c.vel, 2.2); // hop
+          else if (type === 16 + c.side) c.target = value > 0 ? 0.45 : 0; // raise / lower one side
+        }
+      },
+      reset() {
+        for (const c of cars) {
+          c.target = 0;
+          c.vel = 0;
+        }
+      },
+      update(t, dt) {
+        for (let i = 0; i < cars.length; i++) {
+          const c = cars[i];
+          if (c.lift === c.target && c.hop === 0 && c.vel === 0) continue;
+          c.lift += (c.target - c.lift) * (1 - Math.exp(-8 * dt));
+          if (Math.abs(c.target - c.lift) < 1e-3) c.lift = c.target;
+          c.vel -= 9.8 * dt;
+          c.hop += c.vel * dt;
+          if (c.hop <= 0) {
+            c.hop = 0;
+            c.vel = 0;
+          }
+          pose(c);
+        }
         rig.sync();
         bounce();
       },

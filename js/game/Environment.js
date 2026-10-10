@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLOR_LEFT, COLOR_RIGHT } from './constants.js';
 import { envLightCounts } from './lightIds.js';
-import { ChromaLighting } from './ChromaLighting.js';
+import { ChromaLighting, LIGHT_TYPES } from './ChromaLighting.js';
+import { ENVIRONMENTS } from './envs/list.js';
 
 // Light groups driven by basic beatmap events:
 // 0 back lasers, 1 ring lights, 2 left lasers, 3 right lasers, 4 center lights
@@ -15,6 +16,72 @@ const LIGHTS = [9, 12, 4, 4, 8];
 const RUNWAY_SEGMENTS = 4; // per side
 
 const _m = new THREE.Matrix4();
+
+// ---------------------------------------------------------------------------
+// Environment modules (js/game/envs/<Name>.js, see envs/CONTRACT.md)
+
+/** Official environments that have a module (Info.dat name -> label). */
+export const ENV_MODULES = ENVIRONMENTS.filter(([, , v3]) => !v3).map(([name, label]) => ({ name, label }));
+const MODULE_NAMES = new Set(ENV_MODULES.map((m) => m.name));
+
+/** Whether an environment (Info.dat name) has a module. */
+export const hasEnvModule = (name) => MODULE_NAMES.has(name);
+
+/** Label of an official environment ('TimbalandEnvironment' -> 'Timbaland'), null if unknown. */
+export function envLabel(name) {
+  const e = ENVIRONMENTS.find(([n]) => n === name);
+  return e ? e[1] : null;
+}
+
+/**
+ * Which environment a map is shown in. setting: 'auto' (the map's own environment), 'default'
+ * (always our own scenery) or an environment name (forced). Returns { name, label, module }:
+ * name = the environment used (null = our own scenery), label for the UI, module = a module exists.
+ */
+export function resolveEnvironment(mapEnv, setting = 'auto') {
+  const pick = setting || 'auto';
+  if (pick === 'default') return { name: null, label: null, module: false, mapEnv };
+  const name = pick === 'auto' ? mapEnv || null : pick;
+  if (!name) return { name: null, label: null, module: false, mapEnv };
+  return { name, label: envLabel(name) || name.replace(/Environment$/, ''), module: hasEnvModule(name), mapEnv };
+}
+
+/** One line for the song page: which environment the map will be shown in. */
+export function environmentText(mapEnv, setting = 'auto') {
+  const r = resolveEnvironment(mapEnv, setting);
+  if ((setting || 'auto') === 'default') return '場景：預設場景（設定）';
+  if (!r.name) return '場景：預設場景';
+  if (!r.module) return `場景：${r.label}（尚未支援，使用預設場景）`;
+  return setting && setting !== 'auto' ? `場景：${r.label}（設定）` : `場景：${r.label}`;
+}
+
+/** The Info.dat environment of a library entry's difficulty (null if unknown). */
+export function entryEnvironment(entry, setIdx, diffIdx) {
+  return entry?.info?.sets?.[setIdx]?.diffs?.[diffIdx]?.environment || null;
+}
+
+const moduleCache = new Map(); // name -> Promise<module definition>
+
+/** Imports an environment module once (later calls share the same promise). Rejects if it fails. */
+export function loadEnvModule(name) {
+  if (!hasEnvModule(name)) return Promise.reject(new Error(`no module for ${name}`));
+  let p = moduleCache.get(name);
+  if (!p) {
+    p = import(`./envs/${name}.js`).then((m) => {
+      const def = m.default;
+      if (!def || typeof def.build !== 'function') throw new Error(`${name}: not an environment module`);
+      return def;
+    });
+    p.catch(() => moduleCache.delete(name)); // allow a retry later
+    moduleCache.set(name, p);
+  }
+  return p;
+}
+
+/** Starts importing a module early (e.g. while a song loads); errors are reported by prepare(). */
+export function preloadEnvModule(name) {
+  if (hasEnvModule(name)) loadEnvModule(name).catch(() => {});
+}
 
 /** Bakes each mesh's transform into a copy of its geometry and merges them (static, same material). */
 function mergeStatic(meshes) {
@@ -92,9 +159,17 @@ export class Environment {
     this.eventIdx = 0;
     this.events = [];
     this.chromaOn = false; // Chroma lighting for the current map (false: group lighting as before)
+    // environment module: built for a run (prepare()), shown while that run plays (reset())
+    this.mod = null; // { name, def, built, lighting, envUpdate, runway }
+    this.active = null; // this.mod while it is shown
+    // our own scenery (hidden while a module is shown); the track / platform stay in root
+    this.scenery = new THREE.Group();
+    this.root.add(this.scenery);
 
     scene.background = new THREE.Color(0x04040a);
     scene.fog = new THREE.Fog(0x04040a, 25, 110);
+    this.background = scene.background;
+    this.fog = scene.fog;
 
     // Ambient lighting for the notes
     scene.add(new THREE.HemisphereLight(0x8899ff, 0x221122, 1.4));
@@ -126,10 +201,10 @@ export class Environment {
     );
     floor.rotation.x = -Math.PI / 2;
     floor.position.y = -0.02;
-    this.root.add(freeze(floor));
+    this.scenery.add(freeze(floor));
     const grid = new THREE.GridHelper(200, 100, 0x18183a, 0x101024);
     grid.position.y = -0.01;
-    this.root.add(freeze(grid));
+    this.scenery.add(freeze(grid));
   }
 
   buildTrack() {
@@ -188,7 +263,8 @@ export class Environment {
     this.runwayRanges = vertexRanges(strips);
     this.runwaySegments = addWhiteColors(mergeStatic(strips));
     for (const s of strips) s.geometry.dispose();
-    this.runwayMesh = freeze(new THREE.Mesh(this.runwayPlain, this.mat(4, true)));
+    this.runwayMat = this.mat(4, true);
+    this.runwayMesh = freeze(new THREE.Mesh(this.runwayPlain, this.runwayMat));
     this.root.add(this.runwayMesh);
     // lane separators (dim, static, merged)
     const laneMat = new THREE.MeshBasicMaterial({ color: 0x1a1a40 });
@@ -222,7 +298,7 @@ export class Environment {
         this.lasers[side].push(pivot);
       }
       this.laserMeshes.push(mesh);
-      this.root.add(mesh);
+      this.scenery.add(mesh);
     }
     this.syncLasers();
   }
@@ -277,7 +353,7 @@ export class Environment {
       ring.userData.index = i;
       this.rings.push(ring);
     }
-    this.root.add(this.ringFrames, this.ringLights);
+    this.scenery.add(this.ringFrames, this.ringLights);
     this.syncRings();
   }
 
@@ -311,7 +387,7 @@ export class Environment {
     parts.push(bar);
     this.backRanges = vertexRanges(parts); // the last one is the bar
     this.backMesh = freeze(new THREE.Mesh(addWhiteColors(mergeStatic(parts)), this.mat(0, true)));
-    this.root.add(this.backMesh);
+    this.scenery.add(this.backMesh);
     geo.dispose();
     barGeo.dispose();
   }
@@ -329,7 +405,7 @@ export class Environment {
     }
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    this.root.add(freeze(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8888aa, size: 0.6, fog: false }))));
+    this.scenery.add(freeze(new THREE.Points(g, new THREE.PointsMaterial({ color: 0x8888aa, size: 0.6, fog: false }))));
   }
 
   setColors(left, right, leftBoost = left, rightBoost = right, white = 0xffffff, whiteBoost = white) {
@@ -360,17 +436,169 @@ export class Environment {
     this.laserSpeed = [1, 1];
   }
 
+  // ---------------------------------------------------------------------------
+  // Environment modules
+
   /**
-   * New run. chroma: { environment } to light the map with its Chroma data (per-light
-   * IDs, colours, gradients, ring / laser motion); null for the group lighting.
+   * Imports (cached) and builds the module for the next run; name null = our own scenery.
+   * Call while the song loads: building and shader compilation happen here, not mid-song.
+   * A module built earlier is reused for the same name and disposed when another is needed.
+   * Returns the module definition ({ name, label, colors … }) or null (none / it failed).
    */
-  reset(events, chroma = null) {
+  async prepare(name, renderer = null, camera = null) {
+    if (!name || !hasEnvModule(name)) {
+      this.disposeModule();
+      return null;
+    }
+    if (this.mod && this.mod.name === name) return this.mod.def;
+    let def;
+    let built;
+    try {
+      def = await loadEnvModule(name);
+      built = def.build();
+      if (!built || !built.root || !built.root.isObject3D) throw new Error('build() returned no root');
+    } catch (e) {
+      console.warn(`無法載入場景 ${name}，改用預設場景`, e);
+      return null;
+    }
+    this.disposeModule();
+    built.root.visible = false;
+    this.scene.add(built.root);
+    const lighting = new ChromaLighting({
+      groups: built.groups || {},
+      rings: built.rings || [],
+      lasers: built.lasers || { left: [], right: [] },
+      banks: built.banks || [],
+      swapColors: built.swapColors || def.swapColors || [],
+      customEvents: built.customEvents || def.customEvents || [],
+      onEvent: built.onEvent ? (type, value, e, t) => built.onEvent(type, value, e, t) : null,
+    }, this.colors);
+    const update = built.update;
+    const lights4 = (built.groups && built.groups[4]) || [];
+    this.mod = {
+      name,
+      def,
+      built,
+      lighting,
+      envUpdate: update ? (t, dt) => update.call(built, t, dt) : null,
+      runway: lights4, // our runway edges follow the brightest of these
+      background: built.background ?? def.background ?? null,
+      fog: built.fog ?? def.fog ?? null,
+    };
+    if (renderer && camera) {
+      // compile the module's shaders now (they would otherwise compile on the first frame)
+      built.root.visible = true;
+      try {
+        if (renderer.compileAsync && renderer.extensions?.has('KHR_parallel_shader_compile')) await renderer.compileAsync(built.root, camera, this.scene);
+        else renderer.compile(built.root, camera, this.scene);
+      } catch (e) {
+        /* compiled on first use instead */
+      }
+      if (this.active !== this.mod) built.root.visible = false;
+    }
+    return def;
+  }
+
+  /** The module definition shown in the current run (null = our own scenery). */
+  get activeModule() {
+    return this.active ? this.active.def : null;
+  }
+
+  disposeModule() {
+    const mod = this.mod;
+    if (!mod) return;
+    if (this.active === mod) this.showModule(null);
+    this.mod = null;
+    try {
+      mod.built.dispose?.();
+    } catch (e) {
+      console.warn('場景釋放失敗', e);
+    }
+    mod.built.root.removeFromParent();
+  }
+
+  /** Shows a prepared module (hiding our scenery) or, with null, our scenery again. */
+  showModule(mod) {
+    if (this.active && this.active !== mod) this.active.built.root.visible = false;
+    this.active = mod;
+    this.scenery.visible = !mod;
+    if (mod) mod.built.root.visible = true;
+    const bg = mod?.background;
+    this.scene.background = bg != null ? new THREE.Color(bg) : this.background;
+    const fog = mod?.fog;
+    this.scene.fog = fog ? new THREE.Fog(fog.color ?? 0x04040a, fog.near ?? 25, fog.far ?? 110) : this.fog;
+  }
+
+  /**
+   * New run with the prepared module: basic events (on / off / flash / fade, boost, rings 8 / 9,
+   * lasers 12 / 13) always, plus the map's Chroma data when `chroma` is on. Light IDs address
+   * the module's lights directly when the map was made for this environment, else they are
+   * mapped proportionally from the map's environment.
+   */
+  resetModule(mod, events, chroma, environment) {
+    this.showModule(mod);
+    this.setChromaMode(false); // our runway strips: plain geometry, coloured below
+    const direct = !environment || environment === mod.name;
+    const counts = direct ? null : envLightCounts(environment);
+    const lit = events.some((e) => LIGHT_TYPES.includes(e.type));
+    const startOn = {};
+    const startLeft = {};
+    if (!lit) {
+      // no light events (or no run): everything on, alternating colours, lasers turning
+      for (const type of mod.lighting.types) {
+        startOn[type] = type === 4 ? 1 : 0.6;
+        startLeft[type] = type % 2 === 0;
+      }
+    }
+    mod.lighting.reset(events, { counts, startOn, startLeft, laserSpeed: lit ? 0 : 1, chroma });
+    mod.built.reset?.();
+  }
+
+  /** Our runway edges follow the brightest of the module's center lights (event 4). */
+  updateModuleRunway(mod) {
+    const lights = mod.runway;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (lights.length) {
+      let best = -1;
+      for (let i = 0; i < lights.length; i++) {
+        const L = lights[i];
+        const s = (L.r > 0 ? L.r : 0) + (L.g > 0 ? L.g : 0) + (L.b > 0 ? L.b : 0);
+        if (s > best) {
+          best = s;
+          r = Math.max(0, L.r);
+          g = Math.max(0, L.g);
+          b = Math.max(0, L.b);
+        }
+      }
+    } else {
+      const c = this.colors.right;
+      r = c.r * 0.6;
+      g = c.g * 0.6;
+      b = c.b * 0.6;
+    }
+    this.runwayMat.color.setRGB(r, g, b);
+  }
+
+  /**
+   * New run. opts.chroma: light the map with its Chroma data (per-light IDs, colours,
+   * gradients, ring / laser motion); opts.environment: the map's environment (light IDs);
+   * opts.module: show the prepared environment module. reset([]) = no run (our scenery).
+   */
+  reset(events, { chroma = false, environment = null, module = false } = {}) {
+    if (module && this.mod) {
+      this.events = events || [];
+      this.resetModule(this.mod, this.events, chroma, environment);
+      return;
+    }
+    if (this.active) this.showModule(null);
     this.events = events || [];
     this.eventIdx = 0;
     this.ringSpinVel = 0;
     this.ringZoomTarget = 1;
     this.boost = false;
-    this.setChromaMode(!!chroma);
+    this.setChromaMode(chroma);
     if (!this.events.some((e) => e.type <= 4)) this.setIdle();
     else {
       for (const g of this.groups) {
@@ -384,7 +612,7 @@ export class Environment {
       this.laserSpeed = [0, 0];
     }
     // light IDs: mapped proportionally from the map's environment onto our lights
-    if (chroma) this.chroma.reset(this.events, { counts: envLightCounts(chroma.environment), startOn: { 4: 0.6 } });
+    if (chroma) this.chroma.reset(this.events, { counts: envLightCounts(environment), startOn: { 4: 0.6 } });
   }
 
   // ---------------------------------------------------------------------------
@@ -419,6 +647,12 @@ export class Environment {
   }
 
   update(t, dt) {
+    if (this.active) {
+      // module: lights, rings, lasers -> the module's own update -> bank uploads (in that order)
+      this.active.lighting.update(t, dt, this.active.envUpdate);
+      this.updateModuleRunway(this.active);
+      return;
+    }
     if (this.chromaOn) {
       this.updateChroma(t, dt);
       return;

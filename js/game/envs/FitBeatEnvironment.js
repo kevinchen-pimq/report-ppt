@@ -14,7 +14,7 @@
 //   3  right lasers   8  rotating lasers on the right, front → back
 //   4  chevron        2  1 = left arm, 2 = right arm
 // rings: small × 15 (spin + zoom), big × 15 (spin). lasers: 8 + 8 (tilted beams spinning around Y).
-// (In the game the back-top ring lasers show the opposite colour; the runtime decides colours, so not reproduced.)
+// As in the game, the top ring lasers show the opposite colour (light.swapColor on the top bars of group 0).
 import { THREE, GEO, trs, mergeStatic, sceneryMaterials, V, GlowBank, PropBank, Rig } from './kit.js';
 
 const SMALL_N = 15;
@@ -79,6 +79,7 @@ export default {
       for (const sy of [1, -1]) {
         const y = sy * (SMALL_R - 0.35);
         addFollowedTube(ring, V(-L * YAW_C, y, L * YAW_S * sy), V(L * YAW_C, y, -L * YAW_S * sy), 0.035, groups[0]);
+        if (sy > 0) groups[0][groups[0].length - 1].swapColor = true; // top bar: opposite colour
       }
     }
 

@@ -8,14 +8,16 @@
 // table was found; groups follow the BSMG wiki description ("back lights, bottom lights, left & right
 // lasers, center lights"; no rings; laser speed) and the light layout of the community editor
 // ChroMapper (reference only: which group drives what, rough positions and per-group order).
-//   0  back lights   12  1-4 overhead lane lines (x = -1.5, -1, 1, 1.5), 5 back-wall strips (all),
+//   0  back lights   13  1-4 overhead lane lines (x = -1.5, -1, 1, 1.5), 5 back-wall strips (all),
 //                        6 / 7 outer side-wall strips L / R, 8 / 9 middle L / R, 10 / 11 inner L / R,
-//                        12 the glowing posts around both car pedestals
-//   1  bottom lights  6  1-4 long floor strips beside the runway (x = -6, -5, 5, 6),
-//                        5 / 6 far lane lines past the goal L / R
+//                        12 / 13 the glowing posts around the left / right car pedestal
+//   1  bottom lights  4  1-4 long floor strips beside the runway (x = -6, -5, 5, 6); 2 / 3 continue
+//                        as the far lane lines past the goal
 //   2  left lasers    7  rotating lasers on the left arc, outer → inner
 //   3  right lasers   7  same on the right
-//   4  center lights  5  1 goal frame, 2 / 3 lane lights through the goal L / R, 4 / 5 small posts L / R
+//   4  center lights  7  1 goal frame, 2 / 3 lane lights through the goal L / R, 4 / 5 small posts L / R,
+//                        6 / 7 the stepped skirt lines along the arena wall base L / R
+// (counts per Heck's light-ID table; which object has which ID: approximate)
 // rings: none. lasers: 7 + 7 (each a tilted beam spinning around Y, so it sweeps a cone).
 import { THREE, GEO, mergeStatic, sceneryMaterials, V, GlowBank, MultiLight, Rig, mergeAll, place } from './kit.js';
 
@@ -56,20 +58,22 @@ export default {
     for (const [x, z, h] of [[40, -14, 17], [35, -38, 12], [28, -46, 9]]) {
       for (const s of [-1, 1]) groups[0].push(glow.tube(V(s * x, 0, z), V(s * x, h, z), 0.08));
     }
-    // 12: posts around the car pedestals
-    {
+    // 12 / 13: posts around the left / right car pedestal
+    for (const s of [-1, 1]) {
       const segs = [];
-      for (const s of [-1, 1]) {
-        const cx = s * 11;
-        const cz = -23;
-        for (const [dx, dz] of [[-5, 0], [5, 0], [0, -5], [0, 5]]) segs.push([V(cx + dx, 0, cz + dz), V(cx + dx, 5, cz + dz)]);
-      }
+      const cx = s * 11;
+      const cz = -23;
+      for (const [dx, dz] of [[-5, 0], [5, 0], [0, -5], [0, 5]]) segs.push([V(cx + dx, 0, cz + dz), V(cx + dx, 5, cz + dz)]);
       groups[0].push(multi(segs, 0.05));
     }
 
     // ---------------- group 1: bottom lights
-    for (const x of [-6, -5, 5, 6]) groups[1].push(glow.tube(V(x, -0.18, 6), V(x, -0.18, -150), 0.03));
-    for (const x of [-2, 2]) groups[1].push(glow.tube(V(x, -0.18, GOAL_Z - 2), V(x, -0.18, -240), 0.03));
+    for (const x of [-6, -5, 5, 6]) {
+      const segs = [[V(x, -0.18, 6), V(x, -0.18, -150)]];
+      // the inner strips continue as the far lane lines past the goal
+      if (Math.abs(x) === 5) segs.push([V(Math.sign(x) * 2, -0.18, GOAL_Z - 2), V(Math.sign(x) * 2, -0.18, -240)]);
+      groups[1].push(segs.length > 1 ? multi(segs, 0.03) : glow.tube(segs[0][0], segs[0][1], 0.03));
+    }
 
     // ---------------- groups 2 / 3: rotating lasers on two arcs behind the goal line
     const lasers = { left: [], right: [] };
@@ -91,16 +95,17 @@ export default {
     {
       const z = GOAL_Z + 0.3;
       // 1: goal frame (posts + crossbar) and the stepped skirt line along the arena wall base
-      groups[4].push(multi([
-        [V(-9, 0, z), V(-9, 7.2, z)], [V(9, 0, z), V(9, 7.2, z)], [V(-9, 7.2, z), V(9, 7.2, z)],
-        [V(-9, 3.2, z), V(-14, 3.2, z)], [V(9, 3.2, z), V(14, 3.2, z)],
-        [V(-14, 3.2, z), V(-16, 1.2, z + 1.5)], [V(14, 3.2, z), V(16, 1.2, z + 1.5)],
-        [V(-16, 1.2, z + 1.5), V(-30, 1.2, z + 3)], [V(16, 1.2, z + 1.5), V(30, 1.2, z + 3)],
-      ], 0.07));
+      groups[4].push(multi([[V(-9, 0, z), V(-9, 7.2, z)], [V(9, 0, z), V(9, 7.2, z)], [V(-9, 7.2, z), V(9, 7.2, z)]], 0.07));
       groups[4].push(glow.tube(V(-2, 0.4, GOAL_Z - 10), V(-2, 0.4, -160), 0.03));
       groups[4].push(glow.tube(V(2, 0.4, GOAL_Z - 10), V(2, 0.4, -160), 0.03));
       groups[4].push(glow.tube(V(-1, 3.3, GOAL_Z - 17), V(-1, 4.6, GOAL_Z - 17), 0.07));
       groups[4].push(glow.tube(V(1, 3.3, GOAL_Z - 17), V(1, 4.6, GOAL_Z - 17), 0.07));
+      // 6 / 7: the stepped skirt lines along the arena wall base
+      for (const s of [-1, 1]) {
+        groups[4].push(multi([
+          [V(s * 9, 3.2, z), V(s * 14, 3.2, z)], [V(s * 14, 3.2, z), V(s * 16, 1.2, z + 1.5)], [V(s * 16, 1.2, z + 1.5), V(s * 30, 1.2, z + 3)],
+        ], 0.07));
+      }
     }
 
     // ---------------- static scenery
