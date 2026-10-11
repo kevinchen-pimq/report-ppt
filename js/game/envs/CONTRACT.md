@@ -73,6 +73,8 @@ export default {
       reset,        // () => void, at the start of every run (put custom state back: rain on …)
       background,   // optional hex colour for the scene background while this environment is shown
       fog,          // optional { color, near, far } scene fog while shown (default: the game's fog)
+      atmosphere,   // optional: false = no lit atmosphere for this environment, or gains
+                    //    { fog, sky, surface, air } (default 1 each), see "Lit atmosphere" below
     };
   },
 };
@@ -200,10 +202,38 @@ but build everything else (floor, towers, lasers, rings, logo shapes …).
   from the module's `update()`. `PropBank`: instanced non-light scenery that can move (pass
   `{ ownMaterial: true }` when its material is also used by ordinary meshes — a material shared by
   instanced and non-instanced meshes makes three.js re-check the shader every frame).
+- The lit atmosphere (fog, scenery tint, air glow) is added by the game for every module, see
+  "Lit atmosphere" above; `wash()` is only needed for a module-specific bounce.
 - `lightMaterial()` (additive: black = invisible) for glowing tubes / panels; `softLightMaterial()`
   with vertex colours (`glowDiscGeometry`, `fadeStripGeometry`); `SoftGlow` haze.
 - Static, non-light scenery: merge per material with `mergeStatic()` / `mergeGeos()`; materials from
   `sceneryMaterials()` / `stdMat()`. Seeded randomness: `rng(seed)`. Text: `strokeText()`.
+
+## Lit atmosphere (`js/game/Atmosphere.js`)
+Like Beat Saber's "bloom fog", the lights light the air and the scenery around them. This is generic:
+a module gets it without any work, from the lights it already returns (`groups` and
+`lightGroups[id].lights`). The setting `atmosphere` ('off' | 'fog' | 'full', default 'full') picks
+how much:
+- **fog / sky** ('fog' and up): every frame an ambient colour is taken from the lit lights (each
+  weighted by its size, divided by the environment's total, compressed so a few lights already
+  show) and added to the fog colour (the module's `fog` or the game's), the background colour and
+  sky domes (`skyDome()`, or any `MeshBasicMaterial` with `side: BackSide, fog: false`, toward the
+  horizon). Lights off = exactly the base colours again.
+- **regions** ('fog' and up): scenery materials (MeshStandard / Basic / Lambert / Phong and
+  LineBasic materials that are not additive and not `toneMapped: false`) get a tint from four
+  "virtual lights" — the average colour of the lights on the left, right, centre and far away —
+  blended by world position in the shader (a few ALU ops per pixel, compiled with the module).
+- **air glow** ('full'): one extra instanced draw call per environment — a soft, camera-facing
+  ribbon around the longest bars of every light (halo banks are skipped), following the lights'
+  instances when they move. Dark lights draw nothing.
+- 'off' = nothing: no patched shaders, no extra mesh, no per-frame work.
+
+Rules for modules: emissive shapes must use additive materials (`lightMaterial()` etc.) or
+`toneMapped: false`, otherwise they get tinted like scenery; give `material.userData.atmo = false`
+to keep a scenery material out, `light.atmo = false` to leave a light out (e.g. a light that is only
+a duplicate of another), `atmosphere: { fog: 0.5 }` etc. to tune the gains, `atmosphere: false` to
+switch it off. Lights the analysis cannot place (no bank instance / mesh, e.g. `AmbientLight` of
+_v3lg.js) count for every region. `wash()` (a module's own bounce light) still works and adds up.
 
 ## Budget (Meta Quest, 90 Hz, rendered twice for stereo)
 ≤ 25 draw calls and ≤ 40 k triangles per environment, no per-frame allocations, no textures larger

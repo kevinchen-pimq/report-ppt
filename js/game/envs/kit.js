@@ -208,6 +208,7 @@ export class GlowBank {
     this.halo = halo && haloMax > 0
       ? new LightBank(parent, haloGeometry, haloMax, { material: lightMaterial({ opacity: haloOpacity }), renderOrder: haloRenderOrder })
       : null;
+    if (this.halo) this.halo.isHalo = true; // the atmosphere's air glow follows the cores only
     this.haloScale = haloScale;
     this.banks = this.halo ? [this.core, this.halo] : [this.core];
   }
@@ -322,6 +323,8 @@ export class SoftGlow {
 /**
  * Ambient "bounce" approximation: average colour of some lights → apply(r, g, b) (e.g. a
  * material's emissive or a haze light). Returns an update function; no allocations.
+ * (The game's lit atmosphere, js/game/Atmosphere.js, already tints fog / sky / scenery for every
+ * environment; use this for a module-specific effect on top.)
  */
 export function wash(sources, apply) {
   const n = sources.length;
@@ -726,6 +729,7 @@ export function skyDome(zenith, horizon, below = 0x000000, radius = 320) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.renderOrder = -10;
   mesh.frustumCulled = false;
+  mesh.userData.atmoSky = true; // lit by the atmosphere toward the horizon (js/game/Atmosphere.js)
   return mesh;
 }
 

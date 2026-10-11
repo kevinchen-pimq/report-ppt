@@ -101,7 +101,7 @@ $('now-cover').addEventListener('click', (ev) => {
 // ---------------------------------------------------------------------------
 // Settings (shared with the in-VR menu through the settings store)
 const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'chroma', 'noodle', 'saberFlip', 'showWalls', 'showBombs', 'showDebris', 'showFps'];
-const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle', 'environment'];
+const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle', 'environment', 'atmosphere'];
 // scene choices: auto / default (in the markup), then every environment that has a module
 for (const { name, label } of ENV_MODULES) {
   const o = document.createElement('option');

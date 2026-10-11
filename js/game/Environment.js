@@ -4,6 +4,7 @@ import { COLOR_LEFT, COLOR_RIGHT } from './constants.js';
 import { envLightCounts } from './lightIds.js';
 import { ChromaLighting, LIGHT_TYPES } from './ChromaLighting.js';
 import { GroupLighting } from './GroupLighting.js';
+import { Atmosphere, AtmosphereTarget, analyseLights, regionWeights, sceneryMaterialsOf } from './Atmosphere.js';
 import { ENVIRONMENTS } from './envs/list.js';
 
 // Light groups driven by basic beatmap events:
@@ -195,6 +196,20 @@ export class Environment {
     this.approximateV3 = false;
     this.approx = null; // { source, lighting: GroupLighting } while in use
     this.approxFrame = (t) => this.approx.lighting.update(t, this.chroma.boost);
+    // lit atmosphere (Atmosphere.js): off until the setting says otherwise (setAtmosphere)
+    this.atmo = new Atmosphere(scene);
+    this.atmo.setExtraMaterials(this.trackMaterials.map((mat) => ({ mat, kind: 'surface' })));
+    this.sceneryAtmo = new AtmosphereTarget({
+      root: this.scenery,
+      materials: sceneryMaterialsOf(this.scenery),
+      analyse: () => this.sceneryAtmoLights(),
+    });
+    this.atmo.setTarget(this.sceneryAtmo);
+  }
+
+  /** Lit atmosphere level: 'off' | 'fog' | 'full' (applies at once). */
+  setAtmosphere(level) {
+    this.atmo.setLevel(level);
   }
 
   mat(group, vertexColors = false) {
@@ -222,6 +237,8 @@ export class Environment {
       new THREE.BoxGeometry(2.6, 0.1, 2.6),
       new THREE.MeshStandardMaterial({ color: 0x15151f, roughness: 0.4, metalness: 0.6 }),
     );
+    // shown with every scenery: tinted by the lit atmosphere of whatever is shown
+    this.trackMaterials = [platform.material];
     platform.position.set(0, -0.05, 0);
     this.root.add(freeze(platform));
     const edge = new THREE.LineSegments(
@@ -238,6 +255,7 @@ export class Environment {
     );
     runway.rotation.x = -Math.PI / 2;
     runway.position.set(0, 0.001, -70 - 1.3);
+    this.trackMaterials.push(runway.material);
     this.root.add(freeze(runway));
     // runway edge strips: static, so merged into one mesh (one draw call)
     const stripGeo = new THREE.BoxGeometry(0.04, 0.02, 140);
@@ -277,6 +295,7 @@ export class Environment {
     this.root.add(this.runwayMesh);
     // lane separators (dim, static, merged)
     const laneMat = new THREE.MeshBasicMaterial({ color: 0x1a1a40 });
+    this.trackMaterials.push(laneMat);
     const laneGeo = new THREE.BoxGeometry(0.01, 0.005, 140);
     const lanes = [-0.6, 0, 0.6].map((x) => {
       const s = new THREE.Mesh(laneGeo);
@@ -506,7 +525,18 @@ export class Environment {
       runway: lights4, // our runway edges follow the brightest of these
       background: built.background ?? def.background ?? null,
       fog: built.fog ?? def.fog ?? null,
+      atmoTarget: null, // lit atmosphere of this module (null: switched off by the module)
     };
+    const atmoTune = built.atmosphere ?? def.atmosphere;
+    if (atmoTune !== false) {
+      mod.atmoTarget = new AtmosphereTarget({
+        root: built.root,
+        materials: sceneryMaterialsOf(built.root),
+        analyse: () => analyseLights(moduleLights(built), built.root),
+        tune: atmoTune || null,
+      });
+      this.atmo.prepare(mod.atmoTarget); // patched shaders are compiled below with the rest
+    }
     // every frame: lights / rings / lasers (ChromaLighting) -> group lighting -> the module's own
     // update -> bank uploads
     mod.envUpdate = (t, dt) => {
@@ -514,6 +544,8 @@ export class Environment {
       else if (mod.groupMode === 'compat') mod.compat.lighting.update(t, dt);
       else if (mod.groupMode === 'approx') mod.approx.lighting.update(t, lighting.boost);
       if (update) update.call(built, t, dt);
+      // after the module moved its lights, before the banks upload them
+      if (this.active === mod) this.atmo.update(dt);
     };
     this.mod = mod;
     if (renderer && camera) {
@@ -522,6 +554,7 @@ export class Environment {
       try {
         if (renderer.compileAsync && renderer.extensions?.has('KHR_parallel_shader_compile')) await renderer.compileAsync(built.root, camera, this.scene);
         else renderer.compile(built.root, camera, this.scene);
+        this.atmo.precompile(renderer, camera);
       } catch (e) {
         /* compiled on first use instead */
       }
@@ -540,6 +573,7 @@ export class Environment {
     if (!mod) return;
     if (this.active === mod) this.showModule(null);
     this.mod = null;
+    this.atmo.release(mod.atmoTarget);
     try {
       mod.built.dispose?.();
     } catch (e) {
@@ -558,6 +592,7 @@ export class Environment {
     this.scene.background = bg != null ? new THREE.Color(bg) : this.background;
     const fog = mod?.fog;
     this.scene.fog = fog ? new THREE.Fog(fog.color ?? 0x04040a, fog.near ?? 25, fog.far ?? 110) : this.fog;
+    this.atmo.setTarget(mod ? mod.atmoTarget : this.sceneryAtmo);
   }
 
   /**
@@ -643,6 +678,7 @@ export class Environment {
    * opts.module: show the prepared environment module. reset([]) = no run (our scenery).
    */
   reset(events, { chroma = false, environment = null, module = false, lightshow = null } = {}) {
+    this.atmo.snap();
     if (module && this.mod) {
       this.events = events || [];
       this.approx = null;
@@ -725,6 +761,7 @@ export class Environment {
     }
     if (this.chromaOn) {
       this.updateChroma(t, dt);
+      this.atmo.update(dt);
       return;
     }
     while (this.eventIdx < this.events.length && this.events[this.eventIdx].time <= t) {
@@ -761,6 +798,72 @@ export class Environment {
       r.position.z = -25 - i * 6 * this.ringZoom;
     }
     this.syncRings();
+    this.atmo.update(dt);
+  }
+
+  /**
+   * Our scenery's lights for the lit atmosphere: one entry per light (its colour follows the
+   * group lighting or the Chroma runtime, whichever is in use) and air glow along the side
+   * lasers, the ring sides and the back beams.
+   */
+  sceneryAtmoLights() {
+    const env = this;
+    const proxy = (group, chromaLight) => ({
+      get r() { return env.chromaOn ? chromaLight.r : env.groups[group].color.r; },
+      get g() { return env.chromaOn ? chromaLight.g : env.groups[group].color.g; },
+      get b() { return env.chromaOn ? chromaLight.b : env.groups[group].color.b; },
+    });
+    const cg = this.chromaTarget.groups;
+    const lights = [];
+    const air = [];
+    const entry = (light, x, z, size) => {
+      const rw = new Float32Array(4);
+      regionWeights(x, z, rw);
+      lights.push({ light, w: Math.max(0.15, Math.min(3, Math.sqrt(size) / 3)), rw });
+    };
+    // a glow ribbon along local a → b (half width w), in the space of `m` (mesh / instance)
+    const fit = (ax, ay, az, bx, by, bz, w, m = null) => {
+      const axis = new THREE.Vector3(bx - ax, by - ay, bz - az);
+      const across = new THREE.Vector3(0, 0, 1).cross(axis);
+      if (across.lengthSq() < 1e-8) across.set(1, 0, 0);
+      across.setLength(w);
+      const f = new THREE.Matrix4().makeBasis(axis, across, new THREE.Vector3(0, 0, w)).setPosition((ax + bx) / 2, (ay + by) / 2, (az + bz) / 2);
+      return m ? f.premultiply(m) : f;
+    };
+    // back beams (merged mesh, baked transforms): far away, big
+    const backLights = cg[0].map((L) => proxy(0, L));
+    for (let i = 0; i < backLights.length; i++) {
+      const rz = (i - 4) * 0.22;
+      entry(backLights[i], -Math.sin(rz) * 60, -130, 160);
+      const beam = new THREE.Object3D();
+      beam.position.set(0, -2, -110);
+      beam.rotation.set(-0.25, 0, rz);
+      beam.updateMatrix();
+      air.push({ mesh: this.backMesh, index: -1, bank: null, fit: fit(0, 0, 0, 0, 160, 0, 1.6, beam.matrix), light: backLights[i], area: 164 * 3.2 });
+    }
+    // rings: four sides each, following the ring instances
+    for (let i = 0; i < this.rings.length; i++) {
+      const L = proxy(1, cg[1][i]);
+      entry(L, 0, this.rings[i].position.z, 14);
+      const h = 7;
+      for (const [ax, ay, bx, by] of [[-h, -h, h, -h], [-h, h, h, h], [-h, -h, -h, h], [h, -h, h, h]]) {
+        air.push({ mesh: this.ringLights, index: i, bank: null, dynamic: true, fit: fit(ax, ay, 0, bx, by, 0, 0.9), light: L, area: 16 * 1.8 });
+      }
+    }
+    // side lasers: 120 m beams up from their pivots
+    for (let side = 0; side < 2; side++) {
+      this.lasers[side].forEach((p, i) => {
+        const L = proxy(2 + side, cg[2 + side][i]);
+        entry(L, p.position.x * 1.6, p.position.z, 120);
+        air.push({ mesh: this.laserMeshes[side], index: i, bank: null, dynamic: true, fit: fit(0, 0, 0, 0, 120, 0, 1.6), light: L, area: 124 * 3.2 });
+      });
+    }
+    // runway strips: thin, count for the centre
+    for (let i = 0; i < cg[4].length; i++) {
+      const seg = i >> 1;
+      entry(proxy(4, cg[4][i]), i % 2 ? 1.22 : -1.22, -1.3 - (140 / RUNWAY_SEGMENTS) * (seg + 0.5), 4);
+    }
+    return { lights, air };
   }
 
   // ---------------------------------------------------------------------------
@@ -840,6 +943,7 @@ export class Environment {
    * is added later, and our own scenery's Chroma runtime or group lighting.
    */
   seek(t) {
+    this.atmo.snap();
     const mod = this.active;
     if (mod) {
       for (const k of Object.keys(mod)) {
@@ -937,6 +1041,14 @@ function approxLightGroups(lightshow, groups, types) {
       out[id] = { lights: hi > lo ? lights.slice(lo, hi) : [lights[q % lights.length]] };
     });
   });
+  return out;
+}
+
+/** Every light of a built module (basic event groups and v3 light groups; duplicates allowed). */
+function moduleLights(built) {
+  const out = [];
+  for (const L of Object.values(built.groups || {})) if (Array.isArray(L)) out.push(...L);
+  for (const g of Object.values(built.lightGroups || {})) if (g && Array.isArray(g.lights)) out.push(...g.lights);
   return out;
 }
 

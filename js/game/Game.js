@@ -141,6 +141,7 @@ export class Game {
     this.notes.setOptions({ walls: s.showWalls !== false, bombs: s.showBombs !== false });
     this.effects.setShowDebris(s.showDebris !== false);
     this.fps.setEnabled(s.showFps);
+    this.env.setAtmosphere(s.atmosphere);
     if (this.xrSession) {
       this.applyRefreshRate();
       if ((s.renderScale || 1) !== this.appliedRenderScale && this.state === 'menu') {

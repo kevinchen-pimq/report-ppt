@@ -20,6 +20,8 @@ const ROWS = 5;
 const ACTIVE_JOB = new Set(['queued', 'downloading', 'paused']);
 const JOB_W = 380; // row space taken by the download controls
 
+// lit atmosphere levels (settings.atmosphere), as on the web page
+const ATMOSPHERE = [['off', '關閉'], ['fog', '只有霧氣'], ['full', '完整']];
 const CX = 290; // content area left
 const CW = 985; // content area width
 
@@ -949,11 +951,11 @@ export class Menu {
   }
 
   // ----- appearance -------------------------------------------------------------
-  chipRow(p, idPrefix, y, label, options, current, onPick, disabledFn = () => false) {
+  chipRow(p, idPrefix, y, label, options, current, onPick, disabledFn = () => false, x0 = 150) {
     p.text(label, CX, y + 42, { size: 30, weight: 700 });
     const w = Math.min(190, (CW - 160) / options.length - 10);
     options.forEach(([value, text], i) => {
-      p.button(`${idPrefix}-${value}`, CX + 150 + i * (w + 10), y, w, 64, text, {
+      p.button(`${idPrefix}-${value}`, CX + x0 + i * (w + 10), y, w, 64, text, {
         size: 24,
         active: current === value,
         disabled: disabledFn(value),
@@ -968,6 +970,7 @@ export class Menu {
     const names = g.customModels.names;
     p.text('外觀', CX, 75, { size: 44, weight: 800 });
     p.text('右側為即時預覽', CX + 120, 75, { size: 24, color: THEME.muted });
+    p.text('變更立即套用；遊戲中途變更則在下一首歌開始時生效', CX + 330, 75, { size: 22, color: THEME.accent, maxWidth: CW - 330 });
     this.chipRow(p, 'ap-saber', 110, '光劍', SABER_STYLES, s.saberModel, (v) => settings.set({ saberModel: v }), (v) => v === 'custom' && !g.customModels.saber);
     if (names.saber) {
       p.text(`自訂光劍：${names.saber}`, CX + 150, 210, { size: 22, color: THEME.muted, maxWidth: 520 });
@@ -977,10 +980,12 @@ export class Menu {
     if (names.note) p.text(`自訂方塊：${names.note}`, CX + 150, 360, { size: 22, color: THEME.muted, maxWidth: 520 });
     this.chipRow(p, 'ap-wall', 410, '牆壁', WALL_STYLES, s.wallStyle, (v) => settings.set({ wallStyle: v }));
     this.environmentRow(p, 500, s.environment || 'auto');
-    p.text('自訂模型：在網頁的「外觀」區上傳 glTF 2.0（.glb）檔，會保存在這個瀏覽器中。', CX, 648, { size: 24, color: THEME.muted, maxWidth: CW });
-    p.text('光劍：最長的軸會當成劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。', CX, 682, { size: 22, color: THEME.muted, maxWidth: CW });
-    p.text('方塊：模型正面朝 +Z，會自動縮放置中並套用方塊顏色。', CX, 712, { size: 22, color: THEME.muted, maxWidth: CW });
-    p.text('變更立即套用；遊戲中途變更則在下一首歌開始時生效', CX, 752, { size: 22, color: THEME.accent });
+    // lit atmosphere: applies at once (also mid-song)
+    this.chipRow(p, 'ap-atmo', 616, '場地霧氣光暈', ATMOSPHERE, s.atmosphere || 'full', (v) => settings.set({ atmosphere: v }), () => false, 220);
+    p.text('燈光照亮霧氣', CX + 830, 656, { size: 20, color: THEME.muted, maxWidth: CW - 830 });
+    p.text('自訂模型：在網頁的「外觀」區上傳 glTF 2.0（.glb）檔，會保存在這個瀏覽器中。', CX, 722, { size: 22, color: THEME.muted, maxWidth: CW });
+    p.text('光劍：最長的軸會當成劍身，名稱含 blade / glow / color 的材質會套用光劍顏色。', CX, 750, { size: 22, color: THEME.muted, maxWidth: CW });
+    p.text('方塊：模型正面朝 +Z，會自動縮放置中並套用方塊顏色。', CX, 778, { size: 22, color: THEME.muted, maxWidth: CW });
   }
 
   /** Scene chooser: auto (the map's environment) / our default / ◀ one environment ▶. */

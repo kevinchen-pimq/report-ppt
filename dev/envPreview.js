@@ -1,14 +1,17 @@
 // Dev-only preview of an environment module (js/game/envs/<name>.js) with a simple
 // v2 lighting driver. Not deployed. Query: ?env=<Name>&pattern=<p>&cam=<c>&t=<seconds>
-//   pattern: all | groups | chase | rings | lasers | cycle (default cycle)
+//   pattern: all | groups | chase | rings | lasers | cycle (default cycle) | none (every light off)
 //   cam: player | orbit | side | top (default player), or pos=x,y,z&look=x,y,z; t: freeze the clock
+//   atmo: off | fog | full (default full) — the lit atmosphere (js/game/Atmosphere.js)
 import * as THREE from 'three';
+import { Atmosphere, AtmosphereTarget, analyseLights, sceneryMaterialsOf } from '../js/game/Atmosphere.js';
 
 const q = new URLSearchParams(location.search);
 const ENV = q.get('env') || 'DefaultEnvironment';
 const PATTERN = q.get('pattern') || 'cycle';
 const CAM = q.get('cam') || 'player';
 const FIXED_T = q.has('t') ? Number(q.get('t')) : null;
+const ATMO = q.get('atmo') || 'full';
 const hud = document.getElementById('hud');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -42,6 +45,7 @@ addEventListener('resize', () => {
 });
 
 // Stand-in for what the game draws itself: player platform + runway + lanes
+const standIn = [];
 {
   const m = new THREE.MeshStandardMaterial({ color: 0x0a0b16, roughness: 0.4, metalness: 0.5 });
   const plat = new THREE.Mesh(new THREE.BoxGeometry(2, 0.1, 2), m);
@@ -49,6 +53,7 @@ addEventListener('resize', () => {
   const run = new THREE.Mesh(new THREE.BoxGeometry(2, 0.05, 40), m);
   run.position.set(0, -0.03, -21);
   scene.add(plat, run);
+  standIn.push(m);
   const lane = new THREE.LineBasicMaterial({ color: 0x334488 });
   for (const x of [-1, 1]) {
     const g = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0.01, 1), new THREE.Vector3(x, 0.01, -41)]);
@@ -71,6 +76,11 @@ try {
   console.error(e);
   throw e;
 }
+// the module's own background / fog, as in the game
+const bg = env.background ?? mod.background;
+if (bg != null) scene.background = new THREE.Color(bg);
+const fog = env.fog ?? mod.fog;
+if (fog) scene.fog = new THREE.Fog(fog.color ?? 0x04040a, fog.near ?? 25, fog.far ?? 110);
 const groups = env.groups || {};
 const types = Object.keys(groups).map(Number).sort((a, b) => a - b);
 const rings = env.rings || [];
@@ -89,6 +99,20 @@ for (const id of lgIds) {
       o.userData.rest[kind + ax] = kind === 'rotation' ? o.rotation[ax] : o.position[ax];
     }
   }
+}
+
+// lit atmosphere, as the game sets it up (Environment.prepare / showModule)
+const atmo = new Atmosphere(scene);
+{
+  const tune = env.atmosphere ?? mod.atmosphere;
+  const all = [...types.flatMap((ty) => groups[ty]), ...lgIds.flatMap((id) => lightGroups[id].lights)];
+  atmo.setExtraMaterials(standIn.map((mat) => ({ mat, kind: 'surface' })));
+  if (tune !== false) {
+    atmo.setTarget(new AtmosphereTarget({ root: env.root, materials: sceneryMaterialsOf(env.root), analyse: () => analyseLights(all, env.root), tune: tune || null }));
+  }
+  atmo.setLevel(ATMO);
+  // for test scripts
+  window.__atmo = atmo;
 }
 
 function setAll(type, rgb, k = 1) {
@@ -192,6 +216,7 @@ function frame() {
   const t = FIXED_T ?? (performance.now() - t0) / 1000;
   const pat = drive(t);
   env.update?.(t, 1 / 60);
+  atmo.update(1 / 60);
   for (const b of env.banks || []) b.update();
   renderer.render(scene, camera);
   frames++;

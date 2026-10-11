@@ -29,6 +29,7 @@ export const DEFAULTS = {
   showFps: false, // frame-rate counter in the lower left of the view
   renderScale: 1, // VR render resolution (WebXR framebuffer scale); takes effect when entering VR
   refreshRate: 0, // VR refresh rate to request (Hz); 0 = the headset's default
+  atmosphere: 'full', // lit fog / haze from the environment's lights: 'off' | 'fog' (fog, sky, scenery tint) | 'full' (+ glow in the air around beams)
 };
 
 // Ranges and steps used by both UIs
