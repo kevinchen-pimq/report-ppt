@@ -19,11 +19,12 @@ export function hex(c) {
 }
 
 /** Module colour scheme from [r, g, b] (0..1) values. */
-export function scheme({ left, right, envLeft, envRight, wall, envLeftBoost, envRightBoost, envWhite }) {
+export function scheme({ left, right, envLeft, envRight, wall, envLeftBoost, envRightBoost, envWhite, envWhiteBoost }) {
   const o = { left: hex(left), right: hex(right), envLeft: hex(envLeft), envRight: hex(envRight), wall: hex(wall) };
   if (envLeftBoost) o.envLeftBoost = hex(envLeftBoost);
   if (envRightBoost) o.envRightBoost = hex(envRightBoost);
   if (envWhite) o.envWhite = hex(envWhite);
+  if (envWhiteBoost) o.envWhiteBoost = hex(envWhiteBoost);
   return o;
 }
 

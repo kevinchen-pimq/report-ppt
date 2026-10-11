@@ -31,7 +31,7 @@
 // has no effect here.
 // Approximate: all positions / sizes and the head shape; the screens' animated content is a
 // fixed pattern; element order inside groups.
-import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, SoftGlow, trs, rng, mergeAll, stdMat, lightMaterial } from './kit.js';
+import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, SoftGlow, trs, rng, mergeAll, stdMat, lightMaterial, applyMirrors } from './kit.js';
 import { pivot, lightGroup, addPivot, multi, fxGroup, starField, disposeAll, rigPolyline, ringGeometry } from './_v4common.js';
 
 const HEAD_Z = -118;
@@ -59,6 +59,15 @@ function squareFrameGeometry(w = 0.1) {
   return mergeAll(parts);
 }
 
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 0: 'xyZ', 1: 'xyZ', 2: 'xZ', 3: 'xzXZ', 4: 'xzXZ', 5: 'xyZ', 7: 'xzXZ', 9: 'xyzZ', 10: 'xZ',
+  14: 'xyZ', 15: 'xzXZ', 19: 'xyZ', 20: 'xzXZ', 22: 'xyZ', 23: 'xyZ', 25: 'xzXZ', 26: 'xzXZ',
+  28: 'xyZ', 29: 'xyZ', 31: 'xzXZ', 32: 'xzXZ' };
+
 export default {
   name: 'Monstercat2Environment',
   label: 'Monstercat 2.0',
@@ -70,6 +79,7 @@ export default {
     envLeftBoost: '#B61C1C',
     envRightBoost: '#168CA5',
     wall: '#3B26A3',
+    envWhite: '#B9B9B9', // the game's white light colour (used when the map has none)
   },
   build() {
     const root = new THREE.Group();
@@ -129,8 +139,9 @@ export default {
         const cp = addPivot(LG[gid], pivot(root, s * 9.5, -0.5, -12 - g * 11, 0, s * 0.35, -s * 0.42));
         rig.attach([cp], props, trs([s * 0.35, 6, 0], [0, 0, 0], [0.5, 13, 1.6], m));
         for (let q = 0; q < 4; q++) {
-          const lp = addPivot(LG[pid], pivot(cp, -s * 0.05, 2 + q * 3, 0, 0, -s * Math.PI / 2, 0));
-          LG[pid].lights.push(rig.light([cp, lp], panels, trs([0, 0, 0], [0, 0, 0], [1.9, 2.6, 1], m)));
+          // pivot axes as in the game (the column's); the panel's turn toward the track is in the light matrix
+          const lp = addPivot(LG[pid], pivot(cp, -s * 0.05, 2 + q * 3, 0));
+          LG[pid].lights.push(rig.light([cp, lp], panels, trs([0, 0, 0], [0, -s * Math.PI / 2, 0], [1.9, 2.6, 1], m)));
         }
       }
     }
@@ -186,11 +197,20 @@ export default {
       const ring = addPivot(LG[9], pivot(root, 0, 15, -62));
       const R = 7;
       for (let i = 0; i < 20; i++) {
-        const a = (i / 20) * Math.PI * 2;
+        // as in the game: element 0 at the top, then clockwise; a fixed mount per laser with
+        // x = the circle's tangent, y = along the runway (away from the player), z = outward; the
+        // pivot spins around y (outer) and tilts around x (inner), translation z = radial
+        const a = Math.PI / 2 - (i / 20) * Math.PI * 2;
         const b = a + Math.PI * 0.8;
-        const p = addPivot(LG[10], pivot(ring, Math.cos(a) * R, Math.sin(a) * R, 0));
-        const dir = V(Math.cos(b) * R - Math.cos(a) * R, Math.sin(b) * R - Math.sin(a) * R, 0).multiplyScalar(2.2);
-        LG[10].lights.push(T([ring, p], V(0, 0, 0), dir, 0.035));
+        const X = V(Math.sin(a), -Math.cos(a), 0);
+        const Y = V(0, 0, -1);
+        const Z = V(Math.cos(a), Math.sin(a), 0);
+        const mount = pivot(ring, Math.cos(a) * R, Math.sin(a) * R, 0);
+        mount.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+        const p = addPivot(LG[10], pivot(mount));
+        p.rotation.order = 'YXZ';
+        const d = V(Math.cos(b) * R - Math.cos(a) * R, Math.sin(b) * R - Math.sin(a) * R, 0).multiplyScalar(2.2);
+        LG[10].lights.push(T([ring, mount, p], V(0, 0, 0), V(X.dot(d), Y.dot(d), Z.dot(d)), 0.035));
       }
     }
 
@@ -252,7 +272,7 @@ export default {
       root,
       banks: [...glow.banks, props, rings, panels, frames, fills],
       groups: { 6: [haze] },
-      lightGroups: LG,
+      lightGroups: applyMirrors(LG, MIRROR),
       fx,
       background: 0x040309,
       update() {

@@ -25,7 +25,7 @@
 // list + preview image, gameplay video thumbnails, ArcViewer colour table.
 // Approximate: cluster spacing / distance, beam directions, triangle size; the triangle lies just
 // below the runway surface so the game's runway covers the part in the middle.
-import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, stdMat, MultiLight } from './kit.js';
+import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, stdMat, MultiLight, applyMirrors } from './kit.js';
 import { LG, finishGroups, pivot, chainTubes, tubes, AmbientLight, mat } from './_v3lg.js';
 
 const CY = 3; // runway axis height of the cluster rows
@@ -51,6 +51,14 @@ class FxSpread {
   }
 }
 
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 0: 'Z', 1: 'xz', 2: 'xz', 4: 'z', 6: 'z', 7: 'XZ', 8: 'x', 9: 'x', 14: 'YZ',
+  15: 'x', 16: 'Y', 21: 'XYZ', 22: 'xz', 23: 'zY', 25: 'z', 27: 'z', 28: 'yZ', 30: 'Z' };
+
 export default {
   name: 'LatticeEnvironment',
   label: 'Lattice',
@@ -62,6 +70,7 @@ export default {
     envLeftBoost: '#8b22d0',
     envRightBoost: '#67eaea',
     wall: '#77b5ff',
+    envWhite: '#B9B9B9', // the game's white light colour (used when the map has none)
   },
   build() {
     const root = new THREE.Group();
@@ -164,7 +173,7 @@ export default {
       root,
       banks: [...lasers.banks, ...spots.banks, dots, bodies],
       groups: { 6: [ambient] },
-      lightGroups: G,
+      lightGroups: applyMirrors(G, MIRROR),
       fx,
       background: 0x020208,
       update() {

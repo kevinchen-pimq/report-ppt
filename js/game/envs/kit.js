@@ -398,12 +398,16 @@ export class PropBank {
  * fixed matrix in front, e.g. a mirror or a mount pose). obj.userData.map(obj, out) may replace
  * a pivot's own matrix (e.g. turn the spin angle into an up / down movement).
  * Call update() from the module's update(); only moved pivots are recomputed, no allocations.
+ * Chains share their common prefixes (each pivot's composed matrix is computed once per frame), so
+ * a binding costs one matrix product however deep its chain is. A pivot needs no scene-graph parent.
  */
 export class Rig {
   constructor(parent = null) {
     this.parent = parent;
     this.entries = []; // tracked pivots
     this.chains = []; // bindings with chains of more than one pivot
+    this.nodes = []; // chain prefixes (see _link)
+    this._linked = true;
     this._m = new THREE.Matrix4();
   }
 
@@ -434,7 +438,10 @@ export class Rig {
     for (const o of list) this.track(o);
     const item = { bank, index, local: local.clone(), pre: pre ? pre.clone() : null, chain: list };
     if (list.length === 1) list[0].userData.rig.items.push(item);
-    else this.chains.push(item);
+    else {
+      this.chains.push(item);
+      this._linked = false;
+    }
     return item;
   }
 
@@ -495,17 +502,49 @@ export class Rig {
       const items = e.items;
       for (let i = 0; i < items.length; i++) this.apply(items[i], e.mat);
     }
+    // chains: the composed matrix of every chain prefix is kept once (parent prefix × own pivot)
+    // and recomputed only when a pivot in that prefix moved, so a binding costs one product
+    if (!this._linked) this._link();
+    const ns = this.nodes;
+    for (let i = 0; i < ns.length; i++) {
+      const n = ns[i];
+      if (n.parent) {
+        n.wd = n.parent.wd || n.e.dirty;
+        if (n.wd) n.world.multiplyMatrices(n.parent.world, n.e.mat);
+      } else {
+        n.wd = n.e.dirty;
+        n.world = n.e.mat;
+      }
+    }
     const cs = this.chains;
     for (let i = 0; i < cs.length; i++) {
       const it = cs[i];
-      let dirty = false;
-      for (let k = 0; k < it.chain.length; k++) if (it.chain[k].userData.rig.dirty) dirty = true;
-      if (!dirty) continue;
-      const m = this._m.copy(it.chain[0].userData.rig.mat);
-      for (let k = 1; k < it.chain.length; k++) m.multiply(it.chain[k].userData.rig.mat);
-      m.multiply(it.local);
+      if (!it.node.wd) continue;
+      const m = this._m.multiplyMatrices(it.node.world, it.local);
       if (it.pre) m.premultiply(it.pre);
       it.bank.setMatrix(it.index, m);
+    }
+  }
+
+  /** Builds the prefix tree of the chain bindings (parents before children). */
+  _link() {
+    this._linked = true;
+    this.nodes = [];
+    const roots = new Map();
+    for (const it of this.chains) {
+      let parent = null;
+      let level = roots;
+      for (const o of it.chain) {
+        let n = level.get(o);
+        if (!n) {
+          n = { e: o.userData.rig, parent, world: parent ? new THREE.Matrix4() : null, wd: true, kids: new Map() };
+          level.set(o, n);
+          this.nodes.push(n);
+        }
+        parent = n;
+        level = n.kids;
+      }
+      it.node = parent;
     }
   }
 
@@ -519,6 +558,26 @@ export class Rig {
     if (it.pre) m.premultiply(it.pre);
     it.bank.setMatrix(it.index, m);
   }
+}
+
+/**
+ * Sets the `mirror` flags of `lightGroups` from a table { [groupId]: 'xzY' }: lower-case letters =
+ * rotation axes, upper-case = translation axes whose value the runtime negates. Groups listed get
+ * exactly these flags (others are left alone); a group listed with '' has none. Use it to make a
+ * group turn / move the way Beat Saber's does for our pivots' orientation (see CONTRACT.md).
+ */
+export function applyMirrors(lightGroups, table) {
+  for (const [id, spec] of Object.entries(table)) {
+    const g = lightGroups[id];
+    if (!g) continue;
+    for (const [kind, letters] of [['rotation', 'xyz'], ['translation', 'XYZ']]) {
+      if (!g[kind]) continue;
+      const m = {};
+      for (const L of letters) if (spec.includes(L)) m[L.toLowerCase()] = true;
+      g[kind].mirror = m;
+    }
+  }
+  return lightGroups;
 }
 
 /**

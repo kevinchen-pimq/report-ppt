@@ -50,6 +50,7 @@ export default {
     envLeftBoost: '#bc002d',
     envRightBoost: '#6d00c0',
     wall: '#2db2e0',
+    envWhite: '#B9B9B9', // the game's white light colour (used when the map has none)
   },
   build() {
     const root = new THREE.Group();

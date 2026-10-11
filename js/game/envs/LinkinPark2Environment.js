@@ -7,7 +7,8 @@
 //
 // v3 light groups (id → what, elements, rotation / translation axes). Element order: approximate.
 //   0  Circular Lasers Global Distant  1   rot z, trans z   (whole distant laser ring)
-//   1  Circular Lasers Local Distant  20   rot x y, trans z (beams on a circle, clockwise from top)
+//   1  Circular Lasers Local Distant  20   rot x y, trans z (beams on a circle, clockwise from top;
+//                                          y = around the tunnel axis, x = tilt, z = toward the axis)
 //   2  Circular Lasers Global Close    1   rot z, trans z
 //   3  Circular Lasers Local Close    20   rot x y, trans z
 //   4  Tunnels Rings                   4   rot z, trans x y z (dashed light rings, near → far)
@@ -33,12 +34,19 @@
 // Steam store screenshots, ArcViewer's colour table (GPL, values only).
 // Approximate: tunnel size, ring / arc positions, which element sits where, translation scale (1 m
 // per unit), the logo shape (simple bars).
-import { THREE, GEO, GlowBank, LightBank, Rig, V, stdMat, mergeAll, trs } from './kit.js';
+import { THREE, GEO, GlowBank, LightBank, Rig, V, stdMat, mergeAll, trs, applyMirrors } from './kit.js';
 import { LG, finishGroups, pivot, chainTubes, AmbientLight, ringGeometry, mat } from './_v3lg.js';
 
 const TY = 4; // tunnel axis height
 const TR = 10; // tunnel radius
 const D2R = Math.PI / 180;
+
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 0: 'zZ', 2: 'zZ', 4: 'zZ', 5: 'Z', 6: 'xyZ', 7: 'xyXZ', 11: 'Z', 12: 'z', 18: 'z' };
 
 export default {
   name: 'LinkinPark2Environment',
@@ -51,6 +59,8 @@ export default {
     envLeftBoost: '#eb9841',
     envRightBoost: '#48759f',
     wall: '#a92a2c',
+    envWhite: '#C0AC97', // the game's white light colour (used when the map has none)
+    envWhiteBoost: '#B9B9B9',
   },
   build() {
     const root = new THREE.Group();
@@ -84,13 +94,25 @@ export default {
       G[gGlobal].translation.z.push(gp);
       for (let i = 0; i < 20; i++) {
         const a = (90 - i * 18) * D2R;
-        const x = Math.cos(a) * rad;
-        const y = Math.sin(a) * rad;
-        const lp = pivot(x, y, 0);
-        const end = V(Math.cos(a) * 1.2 - x, Math.sin(a) * 1.2 - y, -150 - z);
-        G[gLocal].lights.push(rig.tube([gp, lp], glow, V(0, 0, 0), end, 0.035));
+        const c = Math.cos(a);
+        const s = Math.sin(a);
+        // as in the game, per laser: a wrapper on the tunnel axis (rotation y = around the axis,
+        // its local y pointing down the tunnel), a mount on the circle (x = tangent, z = inward),
+        // and the laser pivot (translation z = toward the axis, rotation x = tilt)
+        const wrap = pivot(0, 0, 0, -Math.PI / 2, 0, 0);
+        const mount = new THREE.Object3D();
+        mount.position.set(c * rad, 0, s * rad); // wrapper frame: z = up
+        const X = V(s, -c, 0);
+        const Y = V(0, 0, 1);
+        const Z = V(-c, -s, 0);
+        const qw = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+        mount.quaternion.copy(wrap.quaternion).invert().multiply(qw);
+        const lp = pivot();
+        const e = V(c * 1.2 - c * rad, s * 1.2 - s * rad, -150 - z);
+        const end = V(X.dot(e), Y.dot(e), Z.dot(e));
+        G[gLocal].lights.push(rig.tube([gp, wrap, mount, lp], glow, V(0, 0, 0), end, 0.035));
         G[gLocal].rotation.x.push(lp);
-        G[gLocal].rotation.y.push(lp);
+        G[gLocal].rotation.y.push(wrap);
         G[gLocal].translation.z.push(lp);
       }
     };
@@ -111,12 +133,14 @@ export default {
 
     // ---- big arcs: global pivot (rot z around the tunnel axis) → local pivot (trans y z)
     [[-1, -7], [1, -7], [-1, -21], [1, -21]].forEach(([s, z]) => {
-      const gp = pivot(0, TY, z, 0, 0, s < 0 ? Math.PI : 0);
+      // the left arcs are the right ones turned 180° about the axis in the light's own matrix, so
+      // translation y moves all four up (as in the game)
+      const gp = pivot(0, TY, z);
       const lp = pivot(0, 0, 0);
       G[12].rotation.z.push(gp);
       G[5].translation.y.push(lp);
       G[5].translation.z.push(lp);
-      G[5].lights.push(rig.light([gp, lp], arcs, mat(0, 0, 0, 0, 0, 0, TR - 0.9, TR - 0.9, 1)));
+      G[5].lights.push(rig.light([gp, lp], arcs, mat(0, 0, 0, 0, 0, s < 0 ? Math.PI : 0, TR - 0.9, TR - 0.9, 1)));
     });
 
     // ---- laser beams: global pivot on the tunnel axis (rot z) → local pivot at the beam origin
@@ -211,7 +235,7 @@ export default {
       root,
       banks,
       groups: { 3: [ambient] },
-      lightGroups: G,
+      lightGroups: applyMirrors(G, MIRROR),
       update() {
         rig.update();
       },

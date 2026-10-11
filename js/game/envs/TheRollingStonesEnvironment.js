@@ -34,10 +34,20 @@
 // index filters / axes in ~40 BeatSaver maps for this environment; GLS objects, look and colours —
 // BSMG wiki environment list + preview image, Steam store screenshots, ArcViewer colour table.
 // Approximate: every position / size, the logo / heart / cube shapes, piece order, fx meaning.
-import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, stdMat, rng } from './kit.js';
+import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, stdMat, rng, applyMirrors } from './kit.js';
 import { LG, finishGroups, pivot, chainTubes, tubes, AmbientLight, FxOffsets, fxNone, shardGeometry, prismGeometry, mat } from './_v3lg.js';
 
 const AX = ['x', 'y', 'z'];
+
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 0: 'xyZ', 1: 'xyZ', 2: 'yZ', 3: 'yZ', 4: 'yZ', 5: 'yZ', 6: 'XZ', 7: 'XZ', 8: 'XZ',
+  9: 'XZ', 10: 'X', 12: 'xyZ', 13: 'xyZ', 14: 'zZ', 15: 'zZ', 16: 'zZ', 17: 'zZ', 18: 'XZ',
+  19: 'XZ', 20: 'XZ', 21: 'XZ', 24: 'xZ', 25: 'xXZ', 26: 'yZ', 27: 'yzZ', 28: 'y', 29: 'yZ',
+  30: 'yzZ', 31: 'z', 32: 'z', 33: 'z', 34: 'z', 38: 'Z' };
 
 export default {
   name: 'TheRollingStonesEnvironment',
@@ -50,6 +60,7 @@ export default {
     envLeftBoost: '#907600',
     envRightBoost: '#01a3ab',
     wall: '#f30367',
+    envWhite: '#B9B9B9', // the game's white light colour (used when the map has none)
   },
   build() {
     const root = new THREE.Group();
@@ -273,7 +284,7 @@ export default {
       root,
       banks: [...glow.banks, shards, slabs, props],
       groups: { 6: [ambient] },
-      lightGroups: G,
+      lightGroups: applyMirrors(G, MIRROR),
       fx,
       background: 0x0a0616,
       fog: { color: 0x150b26, near: 30, far: 170 },

@@ -17,7 +17,8 @@
 //   17 / 18  Geo Pillars Left / Right              4 each  trans x y z (neon pillars)
 //   19       Environment Runway Ring               1       (ring around the player platform)
 //   20 / 23 / 26 / 29  Hoops L1 / L2 / R1 / R2      3 each  rot x z, trans x y z (board, rim, net)
-//   21 / 24 / 27 / 30  Hoops Pieces L1 … R2       12 each  rot x, trans z (4 pieces per hoop element)
+//   21 / 24 / 27 / 30  Hoops Pieces L1 … R2       12 each  rot x, trans z (4 pieces per hoop element;
+//                                                  as in the game: z = toward the part's centre, x = along it)
 //   22 / 25 / 28 / 31  Balls L1 / L2 / R1 / R2      1 each  rot x y z, trans x y z
 //   32 / 33  Graffiti Floating Graffiti R / L     16 each  (neon tags on the walls)
 //   34       Graffiti Boombox                      1       trans x y z
@@ -32,11 +33,20 @@
 // BSMG wiki environment list + preview image, Steam store screenshots, ArcViewer colour table.
 // Approximate: all positions / sizes, graffiti shapes (random squiggles, arrows), train layout,
 // what the hoop pieces are, the boombox shape (no Eminem logo variant).
-import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, stdMat, rng, MultiLight, mergeAll } from './kit.js';
+import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, stdMat, rng, MultiLight, mergeAll, applyMirrors } from './kit.js';
 import { LG, finishGroups, pivot, chainTubes, tubes, AmbientLight, fxNone, arcSegs, polySegs, mat } from './_v3lg.js';
 
 const AX = ['x', 'y', 'z'];
 const WX = 7.5; // wall distance from the runway axis
+
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 0: 'Z', 1: 'XZ', 2: 'xyZ', 5: 'xzXZ', 6: 'xyZ', 8: 'xyZ', 10: 'yZ', 12: 'zXZ',
+  17: 'Z', 18: 'XZ', 20: 'xZ', 22: 'xyZ', 23: 'xZ', 25: 'xyZ', 26: 'xzXZ', 28: 'zXZ', 29: 'xzXZ',
+  31: 'zXZ', 34: 'Z' };
 
 export default {
   name: 'HipHopEnvironment',
@@ -49,6 +59,8 @@ export default {
     envLeftBoost: '#24fff7',
     envRightBoost: '#3a46ff',
     wall: '#ff508d',
+    envWhite: '#CCC1B4', // the game's white light colour (used when the map has none)
+    envWhiteBoost: '#E0E0E0',
   },
   build() {
     const root = new THREE.Group();
@@ -149,28 +161,42 @@ export default {
       const parts = [
         // backboard: 4 edges
         [[V(0, 0.9, -1.3), V(0, 0.9, 1.3)], [V(0, -0.9, -1.3), V(0, -0.9, 1.3)], [V(0, 0.9, -1.3), V(0, -0.9, -1.3)], [V(0, 0.9, 1.3), V(0, -0.9, 1.3)]],
-        // rim: 4 arcs of a ring sticking out from the board
+        // rim: 4 arcs of a ring sticking out from the board, in the game's piece order (centred on
+        // +x, -z, -x, +z around the rim's centre)
         [0, 1, 2, 3].map((q) => {
-          const a0 = (q * Math.PI) / 2;
+          const a0 = (-q * Math.PI) / 2 - Math.PI / 4;
           const a1 = a0 + Math.PI / 2;
-          return [V(-s * (0.75 + Math.cos(a0) * 0.55), -0.85, Math.sin(a0) * 0.55), V(-s * (0.75 + Math.cos(a1) * 0.55), -0.85, Math.sin(a1) * 0.55)];
+          return [V(-s * 0.75 + Math.cos(a0) * 0.55, -0.85, Math.sin(a0) * 0.55), V(-s * 0.75 + Math.cos(a1) * 0.55, -0.85, Math.sin(a1) * 0.55)];
         }),
-        // net: 4 slanted strands
+        // net: 4 slanted strands (same order)
         [0, 1, 2, 3].map((q) => {
-          const a = (q * Math.PI) / 2 + Math.PI / 4;
-          return [V(-s * (0.75 + Math.cos(a) * 0.55), -0.85, Math.sin(a) * 0.55), V(-s * (0.75 + Math.cos(a) * 0.3), -1.8, Math.sin(a) * 0.3)];
+          const a = (-q * Math.PI) / 2;
+          return [V(-s * 0.75 + Math.cos(a) * 0.55, -0.85, Math.sin(a) * 0.55), V(-s * 0.75 + Math.cos(a) * 0.3, -1.8, Math.sin(a) * 0.3)];
         }),
       ];
+      // ring centre / axis of each part's 4 pieces (board: vertical, facing the track; rim, net: flat)
+      const rings = [[V(0, 0, 0), V(1, 0, 0)], [V(-s * 0.75, -0.85, 0), V(0, 1, 0)], [V(-s * 0.75, -1.3, 0), V(0, 1, 0)]];
       parts.forEach((pieces, k) => {
         const hp = pivot(base.x, base.y, base.z);
         all(gH, 'rotation', hp, ['x', 'z']);
         all(gH, 'translation', hp);
         const L = new MultiLight();
+        const [c0, n] = rings[k];
         for (const [a, b] of pieces) {
+          // as in the game's hoop pieces: a fixed mount per piece with z pointing to the ring's
+          // centre and x along the ring (n × z); the pivot inside tilts around x and slides along z
+          const c = a.clone().add(b).multiplyScalar(0.5);
+          const off = c.clone().sub(c0);
+          const Z = off.addScaledVector(n, -off.dot(n)).normalize().negate();
+          const X = V(0, 0, 0).crossVectors(n, Z);
+          const Y = V(0, 0, 0).crossVectors(Z, X);
+          const mount = pivot(c.x, c.y, c.z);
+          mount.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
           const pp = pivot();
           G[gP].rotation.x.push(pp);
           G[gP].translation.z.push(pp);
-          L.push(rig.tube([hp, pp], glow, a, b, 0.05));
+          const loc = (v) => { const d = v.clone().sub(c); return V(X.dot(d), Y.dot(d), Z.dot(d)); };
+          L.push(rig.tube([hp, mount, pp], glow, loc(a), loc(b), 0.05));
         }
         G[gH].lights.push(L);
       });
@@ -217,13 +243,16 @@ export default {
         [V(-0.7, 0.9, 0), V(0.7, 0.9, 0), r],
       ];
       G[34].lights.push(chainTubes(rig, [p], glow, segs));
-      for (let i = 0; i < 6; i++) {
-        const a = (i / 6) * Math.PI * 2 + 0.3;
-        const sp = pivot(Math.cos(a) * 6.2, Math.sin(a) * 4.4, 0);
+      // shards around the boombox in the game's order (top, then clockwise); translation x
+      // pushes each one outward along its own direction, as in the game
+      [79, 40, -46, -118, 166, 142].forEach((deg) => {
+        const a = (deg * Math.PI) / 180;
+        const mount = pivot(Math.cos(a) * 6.2, Math.sin(a) * 4.4, 0, 0, 0, a);
+        const sp = pivot();
         G[35].translation.x.push(sp);
-        const t = [V(0, 0.8, 0), V(0.6, -0.5, 0), V(-0.6, -0.5, 0)];
-        G[35].lights.push(chainTubes(rig, [p, sp], glow, polySegs(t, 0.06, true)));
-      }
+        const t = [V(0, 0.8, 0), V(0.6, -0.5, 0), V(-0.6, -0.5, 0)].map((v) => v.applyAxisAngle(V(0, 0, 1), -a));
+        G[35].lights.push(chainTubes(rig, [p, mount, sp], glow, polySegs(t, 0.06, true)));
+      });
     }
 
     // ---- spectrograms along the wall feet (16 per side), all on the Y pivot (41)
@@ -255,7 +284,7 @@ export default {
       root,
       banks: [...glow.banks, boxes, geo, trains],
       groups: { 6: [ambient] },
-      lightGroups: G,
+      lightGroups: applyMirrors(G, MIRROR),
       fx,
       update() {
         rig.update();

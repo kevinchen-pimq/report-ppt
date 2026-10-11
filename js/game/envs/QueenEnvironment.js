@@ -17,9 +17,9 @@
 //   12 Distant Circular Lasers 20  lasers on a 5.4 m circle far ahead (clockwise from the top), beams
 //                                  toward the player   rotation x (mirror x), y
 //   13 Top Circular Lasers Rot Y (no light) 1  the spotlight ring   rotation y
-//   14 Top Circular Lasers ... 12  spotlights on a 20 m circle high above, beams down   rotation x
+//   14 Top Circular Lasers ... 12  spotlights on a 20 m circle high above, beams down   rotation x (ours: mirror x)
 //   15 Platform Lane Left .... 24  glowing bricks left of the track, near → far   translation y (±0.5), z (±3)
-//   16 Platform Lane Right ... 24  same, right (translation mirror z)
+//   16 Platform Lane Right ... 24  same, right (game: translation mirror z in a turned frame; ours none)
 //   17 Silhouette Contour .... 3  the three echo copies of the silhouette   translation y, z (±10)
 // Basic events: 4 player platform glow, 6 ambient (haze), 5 colour boost, 40 (special event 0,
 // "Silhouettes") picks the silhouette: 0–3 four performer poses, 4 a chevron (value mod 5).
@@ -137,12 +137,19 @@ export default {
       const L = [];
       for (let k = 0; k < 20; k++) {
         const a = (k / 20) * Math.PI * 2;
-        const base = node(circle, [5.4 * Math.sin(a), 5.4 * Math.cos(a), 0]);
+        // as in the game: a fixed mount per laser whose y axis runs along the runway (toward the
+        // player) and whose x axis is the circle's tangent; y pivot (spin around the runway
+        // direction) → x pivot (tilt in / out), each with identity rest
+        const mount = node(circle, [5.4 * Math.sin(a), 5.4 * Math.cos(a), 0]);
+        const X = new THREE.Vector3(-Math.cos(a), Math.sin(a), 0);
+        const Y = new THREE.Vector3(0, 0, -1);
+        mount.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, new THREE.Vector3().crossVectors(X, Y)));
+        const base = node(mount);
         const src = node(base);
         ry.push(base);
         rx.push(src);
         L.push(multi(
-          B.tube(src, tube, V(0, 0, 0), V(0, 0, -260), 0.02, 3),
+          B.tube(src, tube, V(0, 0, 0), V(0, 260, 0), 0.02, 3), // toward the player at rest
           B.light(src, boxes, mat([0, 0, 0], [0, 0, 0], 0.12), mat([0, 0, 0], [0, 0, 0], 0.45)),
         ));
       }
@@ -161,7 +168,7 @@ export default {
         rx.push(base);
         L.push(B.tube(base, tube, V(0, 0, 0), V(0, -200, 0), 0.08, 3));
       }
-      lg[14] = group(L, { rot: { x: rx } });
+      lg[14] = group(L, { rot: { x: rx, mirror: { x: true } } }); // ours: the base's own x after its yaw
     }
 
     // ---- platform lanes (15, 16)
@@ -173,7 +180,7 @@ export default {
         P.push(p);
         L.push(B.light(p, boxes, mat([0, 0, 0], [0, 0, 0], [0.13, 0.2, 0.4]), mat([0, 0, 0], [0, 0, 0], [0.4, 0.5, 0.8])));
       }
-      lg[id] = group(L, { tr: { y: P, z: P, mirror: { z: s > 0 } } });
+      lg[id] = group(L, { tr: { y: P, z: P } }); // game: right mirrored in a turned frame = same world z
     }
     // dark deck under the bricks
     {

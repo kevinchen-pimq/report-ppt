@@ -41,7 +41,7 @@
 // meaning undocumented) have no effect here.
 // Approximate: every position / size; flames are glowing cones (no particles); lightning bolts
 // are static zig-zags; element order inside groups.
-import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, SoftGlow, MultiLight, trs, rng, softLightMaterial, glowDiscGeometry, mergeAll, beamGeometry, stdMat } from './kit.js';
+import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, SoftGlow, MultiLight, trs, rng, softLightMaterial, glowDiscGeometry, mergeAll, beamGeometry, stdMat, applyMirrors } from './kit.js';
 import { pivot, lightGroup, addPivot, multi, fxGroup, starField, disposeAll, rigPolyline, polyline } from './_v4common.js';
 
 const PX = 7.5; // pillar distance from the track axis
@@ -73,6 +73,16 @@ function flameGeometry() {
   g.setAttribute('color', new THREE.BufferAttribute(col, 3));
   return g;
 }
+
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 0: 'xyZ', 1: 'xyZ', 2: 'xzXZ', 3: 'xyzZ', 4: 'xXZ', 5: 'xyZ', 7: 'xyzZ', 8: 'xXZ',
+  9: 'zXZ', 10: 'yZ', 11: 'yzX', 12: 'xy', 13: 'xy', 20: 'Z', 21: 'Z', 22: 'xyzZ', 23: 'xXZ',
+  24: 'yzZ', 25: 'XZ', 26: 'xyZ', 29: 'xyzZ', 30: 'xXZ', 31: 'Z', 36: 'xzZ', 37: 'xyXZ', 40: 'xyzZ',
+  41: 'xXZ' };
 
 export default {
   name: 'MetallicaEnvironment',
@@ -310,7 +320,7 @@ export default {
       root,
       banks: [...glow.banks, props, bulbs, flashes, flames],
       groups: { 6: [haze] },
-      lightGroups: LG,
+      lightGroups: applyMirrors(LG, MIRROR),
       fx,
       background: 0x030306,
       update() {

@@ -18,7 +18,7 @@
 //   25 / 26  Runway Left / Right                   16 each  trans x y (outer tiles)
 //   27       Background Stars                       3       (three star fields)
 //   28–43    Orbit n Star k (n, k = 1–4)            4 each  (star core + three rings)
-//   44–47    Orbit 1–4 Stars Transform              4 each  rot x y z (star k's position on the orbit)
+//   44–47    Orbit 1–4 Stars Transform              4 each  rot y z (star k's position on the orbit)
 //   48–55    Visor 01 / 02 Offset / Padding X / Y   fx only (value controls; accepted, not shown)
 // Basic events: 6 = ambient light (tints the platforms). Helmet switches / texts (40–43) are not
 // shown (both helmets are always there).
@@ -28,11 +28,19 @@
 // Approximate: all positions / sizes, helmet shapes, tile layout (the middle tiles sit beside the
 // game's runway instead of under it), star element meaning; the scheme's extra white light colours
 // (#7acfff, boost #ffd57c) are not part of the module colour format.
-import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, stdMat, rng, softLightMaterial, glowDiscGeometry, MultiLight, mergeAll } from './kit.js';
+import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, stdMat, rng, softLightMaterial, glowDiscGeometry, MultiLight, mergeAll, applyMirrors } from './kit.js';
 import { LG, finishGroups, pivot, chainTubes, AmbientLight, fxNone, ringGeometry, arcSegs, mat } from './_v3lg.js';
 
 const D2R = Math.PI / 180;
 const AX = ['x', 'y', 'z'];
+
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 2: 'xz', 3: 'z', 4: 'x', 7: 'x', 8: 'z', 9: 'xz', 14: 'xyZ', 15: 'xyZ', 16: 'xyZ',
+  17: 'xyZ', 23: 'xXZ', 24: 'xyZ', 25: 'X', 44: 'yz', 45: 'yz', 46: 'yz', 47: 'yz' };
 
 export default {
   name: 'DaftPunkEnvironment',
@@ -45,6 +53,8 @@ export default {
     envLeftBoost: '#db007a',
     envRightBoost: '#00d1cd',
     wall: '#9b00ff',
+    envWhite: '#7ACFFF', // the game's white light colour (used when the map has none)
+    envWhiteBoost: '#FFD57C',
   },
   build() {
     const root = new THREE.Group();
@@ -186,7 +196,7 @@ export default {
       G[14 + n].lights.push(chainTubes(rig, [op], glow, arcSegs(V(0, 0, 0), rad, 0, Math.PI * 2, 32, 0.035)));
       for (let k = 0; k < 4; k++) {
         const sp = pivot(0, 0, 0, 0, 0, (k * 90 + n * 30 + 20) * D2R);
-        for (const ax of AX) G[44 + n].rotation[ax].push(sp);
+        for (const ax of ['y', 'z']) G[44 + n].rotation[ax].push(sp); // the game has no x axis here
         const g = 28 + n * 4 + k;
         // undo the orbit tilt so the star faces the player
         const face = mat(rad, 0, 0, -tiltX * D2R, 0, 0, 1);
@@ -236,7 +246,7 @@ export default {
       root,
       banks: [...glow.banks, tris, tiles, boxes, starCore, starRing, helmets],
       groups: { 6: [ambient] },
-      lightGroups: G,
+      lightGroups: applyMirrors(G, MIRROR),
       fx,
       background: 0x020208,
       update() {

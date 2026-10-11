@@ -58,6 +58,7 @@ export default {
     envLeft: [0.698, 0.114, 0.373],
     envRight: [0.188, 0.62, 0.624],
     envWhite: [0.833, 0.901, 0.925],
+    envWhiteBoost: [0.878, 0.831, 0.925],
     wall: [0.969, 0.38, 0.275],
     envLeftBoost: [0.902, 0.447, 0.067],
     envRightBoost: [0.637, 0.437, 0.858],

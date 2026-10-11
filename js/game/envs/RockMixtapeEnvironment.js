@@ -25,7 +25,7 @@
 //   23 Face Right ............ 8  same, right (rotation mirror y)
 //   24 Spikes Left ........... 36 neon spike clusters: claw 1 (12), claw 2 (12), claw 3 (12), near → far;
 //                                  per claw two arcs of 6 clusters, bottom → top
-//   25 Spikes Left Movement (no light) 3  the three claws   rotation z; translation x, y (±20)
+//   25 Spikes Left Movement (no light) 3  the three claws   rotation z; translation x, y (±20) (ours: mirror z / x)
 //   26 Spikes Right .......... 36 same, right
 //   27 Spikes Right Movement (no light) 3
 //   28 Dots .................. 5  fret-marker dots on the track (the third is a pair)
@@ -156,7 +156,8 @@ export default {
         }
       });
       lg[id] = group(L);
-      lg[moveId] = group([], { count: 3, rot: { z: claws }, tr: { x: claws, y: claws } });
+      // the game's left claws turn / move mirrored (checked against its world axes): flags on the left
+      lg[moveId] = group([], { count: 3, rot: { z: claws, mirror: { z: s < 0 } }, tr: { x: claws, y: claws, mirror: { x: s < 0 } } });
     }
 
     // ---- video screens (31 – 36)

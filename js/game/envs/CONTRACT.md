@@ -25,7 +25,9 @@ in `list.js` (entries marked `'v3'` have no module). These are **recreations mad
   map's environment (official counts in `js/game/lightIds.js`).
 - Colours: the module's `colors` are the environment's default scheme. Per colour, the first one set
   wins: the map's colours (setting "use map colours") → the player's own colours, when changed from
-  the defaults → the module's `colors` → the game's defaults.
+  the defaults → the module's `colors` → the game's defaults. White lights (v3 colour 2, Chroma
+  white): the map's white (with the Chroma setting on) → the module's `envWhite` / `envWhiteBoost`
+  → white.
 - Maps without any light events show every group lit (alternating colours) with spinning lasers.
 
 ```js
@@ -35,7 +37,8 @@ export default {
   name: 'TimbalandEnvironment',      // Info.dat name
   label: 'Timbaland',                // shown in the UI
   // default colour scheme of the environment (hex strings)
-  colors: { left: '#…', right: '#…', envLeft: '#…', envRight: '#…', wall: '#…', envLeftBoost?: '#…', envRightBoost?: '#…' },
+  colors: { left: '#…', right: '#…', envLeft: '#…', envRight: '#…', wall: '#…', envLeftBoost?: '#…', envRightBoost?: '#…',
+            envWhite?: '#…', envWhiteBoost?: '#…' },
   build() {
     return {
       root,        // THREE.Object3D with all scenery + lights (the game adds it to the scene)
@@ -151,6 +154,32 @@ How the runtime (`js/game/GroupLighting.js`, parsing and maths in `js/lightshow3
   over the map's basic light event types. A v3 map shown where there are no light groups (our
   scenery, an environment without `lightGroups`) looks as before; `Environment.approximateV3 = true`
   would instead spread its colour box groups over the basic lights (off by default).
+
+## Handedness (rotation / translation directions)
+Beat Saber turns each rotation transform by `Quaternion.AngleAxis(±angle, axis)` in its parent's
+frame (left-handed, x right, y up, +z away from the player; minus for the group's mirror flag) and
+moves translation transforms to `lerp(limits, (±value + 1) / 2)` along the parent's axis. The game's
+own frames for every group (positions, nesting, mirror flags, translation limits) are in the
+environment exports ChroMapper uses (UGEcko, `Assets/__Scenes/Environments/Data/<Env>.json`, dev
+branch). For the same look, a module's pivot must turn about the same world axis in the same sense
+(and move the same way) for a +1 event as the game's element does:
+- Converted frame by frame (z flipped), x and y rotations change sign, z rotations keep it; z
+  translations change sign, x and y keep it. `_v3b.js` builds in a scale.z = -1 frame so the official
+  flags apply unchanged when the pivots nest like the game's (child pivots with identity rest).
+- A pivot with several axes on one Object3D composes them as Euler angles (`XYZ`: x turns about the
+  parent's axis, z about its own), so its rest rotation must be identity on the axes in use; put a
+  fixed mount (an extra chain member) in front instead, as the game does (e.g. the circular lasers of
+  Queen / Linkin Park 2 / Monstercat 2: mount with x = tangent, y = along the runway).
+- Translation moves along the parent's axes: a pivot that must slide along its own (rotated) axis
+  needs a mount in front.
+- Whatever the frames, `mirror` flags fix the sense per group and axis; the modules without a Unity
+  frame list them in a `MIRROR` table (`applyMirrors(lightGroups, { id: 'xyZ' })`, kit.js: lower case
+  = rotation, upper case = translation).
+Real maps send the same values to both groups of most left / right pairs (the official editor
+duplicates them), which then mirror because the game's frames / flags do. To check a module, play a
++1 event on one group with the runtime and compare each element's world rotation axis / translation
+direction with the game's (from the export); a synthetic left / right symmetry test is not enough,
+since several official pairs are deliberately not mirrored.
 
 ## Coordinates
 Metres. The player stands at the origin facing **-Z**; notes come from far -Z toward the player.

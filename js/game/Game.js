@@ -219,10 +219,13 @@ export class Game {
     this.sabers[1].setColor(right);
     this.notes.setColors(left, right, mc.obstacle ?? hexOrNull(ec.wall) ?? COLOR_WALL);
     this.arcs.setColors(left, right);
-    // white lights: the map's white colour only with Chroma lighting on
+    // white lights: the map's white colour (only with Chroma lighting on), else the shown
+    // environment module's own white (envWhite / envWhiteBoost; not a player colour), else white
     const ch = this.chromaLights() && s.useMapColors ? this.meta.chroma : null;
-    const white = ch?.white ?? 0xffffff;
-    this.env.setColors(envLeft, envRight, envLeftBoost, envRightBoost, white, ch?.whiteBoost ?? white);
+    const mw = this.runEnv?.colors || {};
+    const white = ch?.white ?? hexOrNull(mw.envWhite) ?? 0xffffff;
+    const whiteBoost = ch?.whiteBoost ?? (ch?.white != null ? ch.white : null) ?? hexOrNull(mw.envWhiteBoost) ?? white;
+    this.env.setColors(envLeft, envRight, envLeftBoost, envRightBoost, white, whiteBoost);
   }
 
   /** Chroma setting on and the current map lights its environment with Chroma events. */

@@ -15,16 +15,16 @@
 //                                   translation y (±1)
 //   3  Big Rings .............. 15  huge rings, near → far: the 4 tangent tubes (right, left, bottom,
 //                                   top) of each   rotation z (mirror z), translation z (±10)
-//   4  Top Spotlights ......... 8   spotlights over the track, near → far   rotation x, y
+//   4  Top Spotlights ......... 8   spotlights over the track, near → far   rotation x, y (ours: mirror y)
 //   5  Runway Left ............ 12  strip segments left of the track: inner line near → far (6), then
 //                                   outer line near → far (6)
 //   6  Runway Right ........... 12  same, right
 //   7  Particles Left ......... 5   sparkle emitters on a diagonal, top-inner → bottom-outer
 //   8  Particles Right ........ 5   same, right
-//   9  Main Lasers Bottom Left  5   laser fan at x = -8 (beams leave upward)   rotation x, y (mirror y)
-//   10 Main Lasers Top Left ... 5   same spot, beams leave downward            rotation x, y (mirror x)
-//   11 Main Lasers Top Right .. 5   x = +8, downward                           rotation x, y (mirror y)
-//   12 Main Lasers Bottom Right 5   x = +8, upward                             rotation x, y (mirror x)
+//   9  Main Lasers Bottom Left  5   laser fan at x = -8 (beams leave upward)   rotation x, y (mirror y; ours y)
+//   10 Main Lasers Top Left ... 5   same spot, beams leave downward            rotation x, y (mirror x; ours x y)
+//   11 Main Lasers Top Right .. 5   x = +8, downward                           rotation x, y (mirror y; ours x)
+//   12 Main Lasers Bottom Right 5   x = +8, upward                             rotation x, y (mirror x; ours none)
 // Basic events: 0 / 1 inner glow lines left / right (below the track), 2 / 3 outer glow lines,
 // 4 "Logo" (a small chevron of two tubes far over the track) + player platform glow, 6 ambient,
 // 5 colour boost.
@@ -134,7 +134,7 @@ export default {
       }
       B.merge(housing, metal.clone());
       B.own(metal);
-      lg[4] = group(L, { rot: { x: rx, y: ry } });
+      lg[4] = group(L, { rot: { x: rx, y: ry, mirror: { y: true } } }); // y: the base is rolled 180°
     }
 
     // ---- runway strips (5, 6)
@@ -164,7 +164,9 @@ export default {
     }
 
     // ---- main lasers (9 – 12)
-    for (const [id, s, down, mirror] of [[9, -1, false, { y: true }], [10, -1, true, { x: true }], [11, 1, true, { y: true }], [12, 1, false, { x: true }]]) {
+    // mirror flags for our pivots (the runtime writes the base's own Euler angles, the game rotates a
+    // child, and our right-side bases face the other way): checked against the game's world axes
+    for (const [id, s, down, mirror] of [[9, -1, false, { y: true }], [10, -1, true, { x: true, y: true }], [11, 1, true, { x: true }], [12, 1, false, {}]]) {
       const rx = [];
       const ry = [];
       const L = [];

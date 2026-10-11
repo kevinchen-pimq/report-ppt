@@ -14,12 +14,13 @@
 //   18 / 19 cubes speaker lights L / R  96  speaker 4k … 4k+3 of cube k (2 × 2 on the
 //                                           face toward the runway)                rot z, tra z (push out)
 //   5   display local                    1  LED band above the stage               rot xyz, tra xyz
-//   6 / 8  top lasers set 01 / 02 global 18 (no light) outer pivot of laser i      rot xyz, tra xyz
+//   6 / 8  top lasers set 01 / 02 global 18 (no light) outer pivot of laser i (on the band's
+//                                           axis, world axes, as in the game)       rot xyz, tra xyz
 //   7 / 9  top lasers set 01 / 02 local  18 laser i: set 01 = fan down from under the
 //                                           band, set 02 = starburst up from its top rot xyz, tra xyz
 //   10  chevron                          1  arch on the stage                      rot xyz, tra xyz
-//   11  outer cylinders bottom lasers   76  vertical lasers on a 300° arc behind / beside the stage,
-//                                           left → right                            rot xyz
+//   11  outer cylinders bottom lasers   76  vertical lasers on a circle around the player (as in
+//                                           the game), clockwise from straight ahead rot xyz
 //   12  runway                           1  both runway edge strips               (colour only)
 //   14  outer cylinders local            2  big tilted rings around the stage, L / R rot xyz, tra xyz
 //   15  spirals local                    2  spirals left / right behind the stage  rot xyz, tra xyz
@@ -33,11 +34,19 @@
 // meaning not documented, probably display content) have no effect here.
 // Approximate: all positions / sizes; the display's changing pictures are one fixed pattern;
 // speaker / cube layout (8 × 3 per side); element order inside groups.
-import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, SoftGlow, MeshLight, MultiLight, trs, rng, lightMaterial, mergeAll, stdMat } from './kit.js';
+import { THREE, GEO, GlowBank, LightBank, PropBank, Rig, V, SoftGlow, MeshLight, MultiLight, trs, rng, lightMaterial, mergeAll, stdMat, applyMirrors } from './kit.js';
 import { pivot, lightGroup, addPivot, multi, fxGroup, starField, disposeAll, rigPolyline, ringGeometry } from './_v4common.js';
 
 const SZ = -58; // stage centre
 const DISPLAY_Y = 10.5;
+
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 0: 'xyzZ', 1: 'xyzZ', 2: 'xXZ', 3: 'xXZ', 5: 'yzX', 6: 'yzX', 7: 'xyZ', 8: 'xyzX',
+  9: 'zZ', 10: 'xyzZ', 14: 'xyZ', 15: 'xyZ', 18: 'z' };
 
 export default {
   name: 'BritneyEnvironment',
@@ -50,6 +59,7 @@ export default {
     envLeftBoost: '#FF7582',
     envRightBoost: '#7BEDCB',
     wall: '#D61800',
+    envWhite: '#B9B9B9', // the game's white light colour (used when the map has none)
   },
   build() {
     const root = new THREE.Group();
@@ -134,11 +144,15 @@ export default {
     for (const [gid, lid, y, r, dir, len] of [[6, 7, DISPLAY_Y - 1.8, 3.4, -1, 18], [8, 9, DISPLAY_Y + 1.8, 4.8, 1, 46]]) {
       for (let i = 0; i < 18; i++) {
         const a = (i / 18) * Math.PI * 2 + (dir > 0 ? Math.PI / 18 : 0);
-        const gp = addPivot(LG[gid], pivot(root, Math.sin(a) * r, y, SZ + Math.cos(a) * r, 0, a, 0));
+        // as in the game, both pivots of laser i sit on the band's axis with the world's axes
+        // (rotation turns the laser around the band's centre); the laser starts on the band, its
+        // direction leaning outward (o = outward, then up / down)
+        const gp = addPivot(LG[gid], pivot(root, 0, y, SZ));
         const lp = addPivot(LG[lid], pivot(gp));
-        // in the pivot frame +z points outward from the band axis
-        const out = dir < 0 ? V(0, -len * 0.62, len * 0.78) : V(0, len * 0.55, len * 0.84);
-        LG[lid].lights.push(T([gp, lp], V(0, 0, 0), out, 0.035));
+        const o = dir < 0 ? [len * 0.78, -len * 0.62] : [len * 0.84, len * 0.55];
+        const start = V(Math.sin(a) * r, 0, Math.cos(a) * r);
+        const end = V(start.x + Math.sin(a) * o[0], o[1], start.z + Math.cos(a) * o[0]);
+        LG[lid].lights.push(T([gp, lp], start, end, 0.035));
       }
     }
 
@@ -153,12 +167,19 @@ export default {
       LG[10].lights.push(rigPolyline(rig, [p], glow, pts, 0.07, false));
     }
 
-    // ---- outer cylinders bottom lasers (11): 76 vertical lasers on an arc around the back
+    // ---- outer cylinders bottom lasers (11): as in the game, 76 vertical lasers on a circle
+    //      around the player (radius 30 m), from just right of straight ahead clockwise (seen
+    //      from above); each turns in its own frame: x = along the circle, z = toward the centre
     for (let i = 0; i < 76; i++) {
-      const a = (-150 + (300 * i) / 75) * (Math.PI / 180); // 0 = straight behind the stage
-      const R = 24;
-      const p = addPivot(LG[11], pivot(root, Math.sin(a) * R, -2, SZ - Math.cos(a) * R));
-      LG[11].lights.push(T([p], V(0, 0, 0), V(0, 34, 0), 0.03));
+      const a = ((i + 1) / 76) * Math.PI * 2;
+      const R = 30;
+      const X = V(-Math.cos(a), 0, -Math.sin(a));
+      const Y = V(0, -1, 0);
+      const Z = V(-Math.sin(a), 0, Math.cos(a));
+      const mount = pivot(root, Math.sin(a) * R, -2, -4.4 - Math.cos(a) * R);
+      mount.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(X, Y, Z));
+      const p = addPivot(LG[11], pivot(mount));
+      LG[11].lights.push(T([mount, p], V(0, 0, 0), V(0, -34, 0), 0.03)); // up (the frame's y points down)
     }
 
     // ---- outer cylinders (14): two big tilted rings around the stage
@@ -245,7 +266,7 @@ export default {
       root,
       banks: [...glow.banks, rims, bands, cubes, speakers, starBank],
       groups: { 6: [haze] },
-      lightGroups: LG,
+      lightGroups: applyMirrors(LG, MIRROR),
       fx,
       background: 0x030208,
       update() {

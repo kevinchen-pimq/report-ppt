@@ -31,13 +31,33 @@
 // Basic events: 6 (light) → background haze glow. No rings / laser-speed events.
 // Approximate: block shapes and sizes, positions, element order inside a block, which laser is
 // "inner" / "outer" / "side"; the game's laser reflections and masks are not modelled.
-import { THREE, GEO, GlowBank, Rig, V, SoftGlow, rng } from './kit.js';
-import { pivot, lightGroup, addPivot, multi, fxGroup, starField, disposeAll, rigPolyline } from './_v4common.js';
+import { THREE, GEO, GlowBank, Rig, V, SoftGlow, rng, applyMirrors } from './kit.js';
+import { lightGroup, addPivot, multi, fxGroup, starField, disposeAll, rigPolyline } from './_v4common.js';
+
+// Pivots stay out of the scene graph (every light follows them through the Rig's chains, so the
+// renderer need not walk ~900 empty objects per frame); `parent` only documents the hierarchy.
+function pivot(parent, x = 0, y = 0, z = 0, rx = 0, ry = 0, rz = 0) {
+  const o = new THREE.Object3D();
+  o.position.set(x, y, z);
+  o.rotation.set(rx, ry, rz);
+  o.matrixAutoUpdate = false;
+  o.updateMatrix();
+  return o;
+}
 
 const BLOCKS = 20;
 const BZ0 = -15; // first center block
 const BDZ = 6; // spacing
 const BY = 2.4; // block centre height
+
+// Mirror flags (CONTRACT.md "Handedness"): lower case = rotation axes, upper case = translation
+// axes whose event value the runtime negates, so that each group turns / moves the way Beat Saber's
+// does with our pivots' orientation. Derived per element from the game's environment data (world
+// rotation axis / translation direction of a +1 event in ChroMapper's UGEcko export) against ours;
+// real maps send the same values to both groups of most left / right pairs, which then mirror.
+const MIRROR = { 0: 'xyzZ', 1: 'xyzZ', 2: 'yY', 3: 'xyzZ', 4: 'xY', 5: 'zZ', 6: 'xyzZ', 7: 'xyzXZ',
+  8: 'xZ', 9: 'xyzXZ', 10: 'xZ', 11: 'yY', 12: 'zXY', 13: 'xyzZ', 14: 'xXZ', 15: 'xY', 16: 'xXZ',
+  17: 'zZ', 18: 'zXY', 21: 'xzZ', 22: 'xyXZ', 23: 'xyzZ' };
 
 export default {
   name: 'ColliderEnvironment',
@@ -50,6 +70,7 @@ export default {
     envLeftBoost: '#E50906',
     envRightBoost: '#DA69F8',
     wall: '#D61800',
+    envWhite: '#B9B9B9', // the game's white light colour (used when the map has none)
   },
   build() {
     const root = new THREE.Group();
@@ -66,6 +87,12 @@ export default {
     LG[19] = lightGroup();
     LG[20] = lightGroup();
     const T = (chain, a, b, r = 0.04) => rig.tube(chain, glow, a, b, r);
+    // fixed mounts for the side lasers: A = -90° about x (local y → away from the player along the
+    // runway, z → up), B = +90° (y → toward the player, z → down); inA / inB: parent → mount coordinates
+    const mountA = (parent, x, y, z) => pivot(parent, x, y, z, -Math.PI / 2, 0, 0);
+    const mountB = (parent, x, y, z) => pivot(parent, x, y, z, Math.PI / 2, 0, 0);
+    const inA = (v) => V(v.x, -v.z, v.y);
+    const inB = (v) => V(v.x, v.z, -v.y);
 
     // ---- center blocks: global pivot (1) → local pivot (0) → one pivot per laser (2 … 5)
     for (let k = 0; k < BLOCKS; k++) {
@@ -81,10 +108,14 @@ export default {
         LG[2].lights.push(T([gp, lp, pi], V(0, -2.4, 0), V(0, 2.4, 0), 0.045));
         const po = addPivot(LG[3], pivot(lp, s * 4.2, 0, 0));
         LG[3].lights.push(T([gp, lp, po], V(0, -4.4, 0), V(0, 4.4, 0), 0.045));
-        const p1 = addPivot(LG[4], pivot(lp, s * 4.2, 4.4, 0));
-        LG[4].lights.push(T([gp, lp, p1], V(0, 0, 0), V(s * 22, 12, -5), 0.035));
-        const p2 = addPivot(LG[5], pivot(lp, s * 4.2, -2.6, 0));
-        LG[5].lights.push(T([gp, lp, p2], V(0, 0, 0), V(s * 26, -3, 4), 0.035));
+        // side lasers turn in a frame tipped 90° about x (as in the game: local y runs along the
+        // runway, z up): mount A, tube ends given in that frame
+        const m1 = mountA(lp, s * 4.2, 4.4, 0);
+        const p1 = addPivot(LG[4], pivot(m1));
+        LG[4].lights.push(T([gp, lp, m1, p1], V(0, 0, 0), inA(V(s * 22, 12, -5)), 0.035));
+        const m2 = mountA(lp, s * 4.2, -2.6, 0);
+        const p2 = addPivot(LG[5], pivot(m2));
+        LG[5].lights.push(T([gp, lp, m2, p2], V(0, 0, 0), inA(V(s * 26, -3, 4)), 0.035));
       }
     }
 
@@ -103,13 +134,18 @@ export default {
           const po = addPivot(LG[outer], pivot(lp, side * 2.6, 0, 0));
           LG[outer].lights.push(T([gp, lp, po], V(0, -9, 0), V(0, 9, 0), 0.035));
         }
+        // side lasers: frame tipped 90° about x as in the game (left: mount A, right: mount B)
+        const mount = s < 0 ? mountA : mountB;
+        const into = s < 0 ? inA : inB;
         for (const dz of [1, -1]) {
-          const p = addPivot(LG[s1], pivot(lp, 0, 0, 0));
-          LG[s1].lights.push(T([gp, lp, p], V(0, 0, 0), V(s * 4, 1, dz * 24), 0.035));
+          const m = mount(lp, 0, 0, 0);
+          const p = addPivot(LG[s1], pivot(m));
+          LG[s1].lights.push(T([gp, lp, m, p], V(0, 0, 0), into(V(s * 4, 1, dz * 24)), 0.035));
         }
         for (const dx of [-1, 1]) {
-          const p = addPivot(LG[s2], pivot(lp, dx * 0.6, d, 0));
-          LG[s2].lights.push(T([gp, lp, p], V(0, 0, 0), V(dx * 10 + s * 6, 26, 0), 0.035));
+          const m = mount(lp, dx * 0.6, d, 0);
+          const p = addPivot(LG[s2], pivot(m));
+          LG[s2].lights.push(T([gp, lp, m, p], V(0, 0, 0), into(V(dx * 10 + s * 6, 26, 0)), 0.035));
         }
       }
     }
@@ -151,7 +187,7 @@ export default {
       root,
       banks: [...glow.banks],
       groups: { 6: [haze] },
-      lightGroups: LG,
+      lightGroups: applyMirrors(LG, MIRROR),
       fx,
       background: 0x020208,
       update() {

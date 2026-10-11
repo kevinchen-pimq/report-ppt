@@ -10,13 +10,13 @@
 //   1  Poles Right ........... 4  same, right                          translation y (±5)
 //   2  Rings Left (no light) . 4  ring sets of the left lamps          translation y (1 … 13)
 //   3  Rings Right (no light)  4  same, right                          translation y (1 … 13)
-//   4  Arrows ................ 8  sky chevrons, near → far             translation z (±100, mirror z)
+//   4  Arrows ................ 8  sky chevrons, near → far             translation z (±100; + = away)
 //   5  Side Lasers Left ...... 4  beams from far ahead toward the player  rotation x (mirror x),
 //                                                                       translation x (±10), y (±18)
 //   6  Side Lasers Right ..... 4  same, right (translation mirror x)
 //   7  Runway Lane ........... 12 dashes on the centre line, near → far
 //   8  Center Ring ........... 1  ring over the far end                rotation y, translation y (±5)
-//   9  Center Ring Lasers .... 6  lasers around that ring (60° apart)  rotation x, y
+//   9  Center Ring Lasers .... 6  lasers around that ring (60° apart)  rotation x, y (ours: mirror x, y)
 //   10 Left 1 Front .......... 25 5 × 5 windows, front face of the near left block (rows top → bottom,
 //                                  serpentine, first row starting on the outer side)
 //   11 Left 1 Side ........... 25 side face (toward the street) of that block (first row near → far)
@@ -63,6 +63,7 @@ export default {
     envLeft: [1, 0.298, 0.141],
     envRight: [0.167, 0.375, 0.708],
     envWhite: [0.877, 0.877, 0.877],
+    envWhiteBoost: [0.98, 0.929, 0.863],
     wall: [0.918, 0.298, 0.008],
     envLeftBoost: [0.957, 0.604, 0.122],
     envRightBoost: [0.525, 0.827, 0.992],
@@ -139,7 +140,7 @@ export default {
         const t = 175 * D2R;
         L.push(B.tube(src, tube, [0, 0, 0], [-Math.sin(t) * 160, Math.cos(t) * 160, 0], 0.06, 2.5));
       }
-      lg[9] = group(L, { rot: { x: rx, y: ry } });
+      lg[9] = group(L, { rot: { x: rx, y: ry, mirror: { x: true, y: true } } }); // the game's bases are rolled ≈ 180° (ours: the beam)
     }
 
     // ---- 4: chevrons in the sky (drawn at 0.75 scale toward the player)
@@ -158,7 +159,7 @@ export default {
         const lm = new THREE.Matrix4().compose(new THREE.Vector3(), q, new THREE.Vector3(30, 22, 1));
         L.push(B.light(p, chev, lm));
       }
-      lg[4] = group(L, { tr: { z: pivots, mirror: { z: true } } });
+      lg[4] = group(L, { tr: { z: pivots } }); // + = away from the player (the game's mirror z is in a turned frame)
     }
 
     // ---- 5 / 6: side lasers from far ahead (drawn at 0.42 scale)
