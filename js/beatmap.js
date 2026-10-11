@@ -1,6 +1,7 @@
 // Parses Beat Saber difficulty files (v2, v3, v4) into a normalized,
 // seconds-based representation used by the game.
 import { parseLightshow3, hasLightshow3, countLightshow3Chroma, easeIndex, GL_EASINGS } from './lightshow3.js';
+import { createNoodleParser, halfJumpFor, meLane, meLayer, meDir, meWidth, meHeight, meWallType } from './noodle.js';
 
 const DEFAULT_NJS = { Easy: 10, Normal: 10, Hard: 10, Expert: 12, ExpertPlus: 16 };
 
@@ -71,7 +72,8 @@ function v2Pos(v) {
 }
 
 function v2Dir(d) {
-  if (d >= 1000 && d <= 1360) return { d: 1, a: d - 1000, precise: true };
+  // Mapping Extensions: rotated clockwise from down (1090 = a left slice)
+  if (d >= 1000 && d <= 1360) return { d: 1, a: 1000 - d, precise: true };
   return { d, a: 0, precise: false };
 }
 
@@ -84,12 +86,23 @@ function detectVersion(json) {
   return 2;
 }
 
-export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
+/**
+ * opts.noodle: apply Noodle Extensions / Mapping Extensions to difficulties that list them
+ * (the `noodle` setting); off = the plain map.
+ */
+export function parseDifficulty(json, { info, diff, audioData, lightshow, noodle = false }) {
   const version = detectVersion(json);
   const bpm = info.bpm;
   const raw = { notes: [], bombs: [], walls: [], chains: [], arcs: [], events: [], bpmChanges: [], njs: [] };
+  // modcharts: Noodle Extensions (v2 / v3) and Mapping Extensions precision placement
+  const useNE = !!(noodle && diff.noodle && (version === 2 || version === 3));
+  const useME = !!(noodle && diff.me && (version === 2 || version === 3));
+  let toTime = null;
+  const np = useNE ? createNoodleParser(json, version, (b) => toTime(b)) : null;
 
-  if (version === 2) {
+  if (useNE || useME) {
+    parseModded(json, version, raw, np, useME);
+  } else if (version === 2) {
     for (const n of json._notes || []) {
       const x = v2Pos(n._lineIndex ?? 0);
       const y = v2Pos(n._lineLayer ?? 0);
@@ -197,7 +210,7 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
     }
   }
 
-  const toTime = makeTiming(bpm, raw.bpmChanges, version === 4 ? audioData : null);
+  toTime = makeTiming(bpm, raw.bpmChanges, version === 4 ? audioData : null);
 
   // Note jump parameters (same formula as the game)
   let njs = diff.njs || DEFAULT_NJS[diff.difficulty] || 10;
@@ -211,25 +224,31 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
 
   const notes = [];
   let id = 0;
+  // modchart objects: noodle data (nd) and fake flags ride along
+  const mod = (o, src) => {
+    if (src.nd) o.nd = src.nd;
+    if (src.fake) o.fake = true;
+    return o;
+  };
   for (const n of raw.notes) {
     if (!Number.isFinite(n.beat)) continue;
-    notes.push({ id: id++, kind: 'note', time: toTime(n.beat), beat: n.beat, x: n.x, y: n.y, color: n.c === 1 ? 1 : 0, dir: n.d, angle: n.a || 0, chroma: n.ch });
+    notes.push(mod({ id: id++, kind: 'note', time: toTime(n.beat), beat: n.beat, x: n.x, y: n.y, color: n.c === 1 ? 1 : 0, dir: n.d, angle: n.a || 0, chroma: n.ch }, n));
   }
   for (const b of raw.bombs) {
     if (!Number.isFinite(b.beat)) continue;
-    notes.push({ id: id++, kind: 'bomb', time: toTime(b.beat), beat: b.beat, x: b.x, y: b.y, color: -1, dir: 8, angle: 0, chroma: b.ch });
+    notes.push(mod({ id: id++, kind: 'bomb', time: toTime(b.beat), beat: b.beat, x: b.x, y: b.y, color: -1, dir: 8, angle: 0, chroma: b.ch }, b));
   }
   for (const ch of raw.chains) {
     const links = buildChainLinks(ch);
     for (const l of links) {
-      notes.push({ id: id++, kind: 'link', time: toTime(l.beat), beat: l.beat, x: l.x, y: l.y, color: ch.c === 1 ? 1 : 0, dir: 8, angle: l.angle, linkAngle: l.angle, chroma: ch.ch });
+      notes.push(mod({ id: id++, kind: 'link', time: toTime(l.beat), beat: l.beat, x: l.x, y: l.y, color: ch.c === 1 ? 1 : 0, dir: 8, angle: l.angle, linkAngle: l.angle, chroma: ch.ch }, ch));
     }
   }
   notes.sort((a, b) => a.time - b.time || a.id - b.id);
 
   const walls = raw.walls
     .filter((w) => Number.isFinite(w.beat) && w.w !== 0 && w.h !== 0)
-    .map((w) => ({ time: toTime(w.beat), endTime: toTime(w.beat + Math.max(0, w.d)), x: w.x, y: w.y, w: w.w, h: w.h, chroma: w.ch }))
+    .map((w) => mod({ time: toTime(w.beat), endTime: toTime(w.beat + Math.max(0, w.d)), x: w.x, y: w.y, w: w.w, h: w.h, chroma: w.ch }, w))
     .sort((a, b) => a.time - b.time);
 
   let chromaEvents = 0;
@@ -274,8 +293,8 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
 
   const njsAt = makeNjsCurve(njs, raw.njs, toTime);
 
-  const colorNotes = notes.filter((n) => n.kind === 'note').length;
-  const links = notes.filter((n) => n.kind === 'link').length;
+  const colorNotes = notes.filter((n) => n.kind === 'note' && !n.fake).length;
+  const links = notes.filter((n) => n.kind === 'link' && !n.fake).length;
   let lastTime = 0;
   for (const n of notes) lastTime = Math.max(lastTime, n.time);
   for (const w of walls) lastTime = Math.max(lastTime, w.endTime);
@@ -292,9 +311,193 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
     chroma: { events: chromaEvents, objects: chromaObjects, used: chromaEvents + chromaObjects > 0 },
     hasLightshow: hasBoxes, // v3 event box groups present
   };
+  if (useNE || useME) {
+    // modchart runtime data (js/game/Noodle.js): per-object jump values, tracks, custom events
+    result.noodle = {
+      ne: useNE,
+      me: useME,
+      fakes: notes.reduce((k, n) => k + (n.fake ? 1 : 0), 0) + walls.reduce((k, w) => k + (w.fake ? 1 : 0), 0),
+      ...(np ? np.finish() : { v2: version === 2, tracks: [], parents: [], players: [], eventCount: 0 }),
+    };
+    prepareModded(notes, walls, njs, diff.offset || 0, bpm);
+  }
   // map.lightshow: the parsed event box groups (js/lightshow3.js) or null
   Object.defineProperty(result, 'lightshow', { get: getLightshow, enumerable: true });
   return result;
+}
+
+// ---------------------------------------------------------------------------
+// Modcharts (Noodle Extensions / Mapping Extensions): raw objects with their noodle data
+
+function parseModded(json, version, raw, np, me) {
+  const v2 = version === 2;
+  const lane = me ? meLane : v2 ? v2Pos : (v) => v;
+  const layer = me ? meLayer : v2 ? v2Pos : (v) => v;
+  const dirOf = (d, a = 0) => {
+    if (me) {
+      const r = meDir(d);
+      return { d: r.d, a: r.a + a };
+    }
+    if (v2) return v2Dir(d);
+    return { d, a };
+  };
+  const data = (cd, kind) => (np ? np.objData(cd, kind) : null);
+  const has = (v) => v !== null && v !== undefined;
+  // coordinates [x, y] replace the grid position (x 0 = the lane left of the centre)
+  const place = (o, nd) => {
+    const c = nd?.coords;
+    if (c) {
+      if (has(c[0])) o.x = c[0] + 2;
+      if (has(c[1])) o.y = c[1];
+    }
+    const tc = nd?.tailCoords;
+    if (tc) {
+      if (has(tc[0])) o.tx = tc[0] + 2;
+      if (has(tc[1])) o.ty = tc[1];
+    }
+    return o;
+  };
+  const note = (beat, x, y, c, d, a, cd, fake) => {
+    const nd = data(cd, c === 3 ? 'bomb' : 'note');
+    const o = { beat, x: lane(x ?? 0), y: layer(y ?? 0), ch: objColor(cd), nd, fake: !!(fake || nd?.fake) };
+    place(o, nd);
+    if (c === 3) {
+      raw.bombs.push(o);
+      return;
+    }
+    let dir = dirOf(d ?? 8, a ?? 0);
+    if (nd && nd.cutAngle !== null) {
+      // v2 Noodle `_cutDirection`: an angle (0 = down); dot notes stay dots
+      dir = { d: dir.d === 8 ? 8 : 1, a: nd.cutAngle };
+    }
+    o.c = c;
+    o.d = dir.d;
+    o.a = dir.a;
+    raw.notes.push(o);
+  };
+  const wall = (beat, x, y, d, w, h, cd, fake) => {
+    const nd = data(cd, 'wall');
+    const o = { beat, x, y, d, w, h, ch: objColor(cd), nd, fake: !!(fake || nd?.fake) };
+    place(o, nd);
+    if (nd?.size) {
+      if (has(nd.size[0])) o.w = nd.size[0];
+      if (has(nd.size[1])) o.h = nd.size[1];
+    }
+    raw.walls.push(o);
+  };
+  const chain = (s, fake) => {
+    const nd = data(s.customData, 'chain');
+    const o = {
+      beat: s.b, x: lane(s.x ?? 0), y: layer(s.y ?? 0), c: s.c ?? 0, d: dirOf(s.d ?? 0).d, tb: s.tb, tx: lane(s.tx ?? 0), ty: layer(s.ty ?? 0),
+      sc: s.sc ?? 3, s: s.s ?? 1, ch: objColor(s.customData), nd, fake: !!(fake || nd?.fake),
+    };
+    raw.chains.push(place(o, nd));
+  };
+  const arc = (a, cd) => {
+    const nd = data(cd, 'arc');
+    const o = { ...a, x: lane(a.x), y: layer(a.y), tx: lane(a.tx), ty: layer(a.ty), d: dirOf(a.d).d, tc: dirOf(a.tc).d, ch: objColor(cd) };
+    raw.arcs.push(place(o, nd));
+  };
+
+  if (v2) {
+    for (const n of json._notes || []) {
+      if (n._type === 0 || n._type === 1 || n._type === 3) note(n._time, n._lineIndex, n._lineLayer, n._type, n._cutDirection, 0, n._customData, false);
+    }
+    for (const o of json._obstacles || []) {
+      let y = 0;
+      let h = 5;
+      if (o._type === 1) {
+        y = 2;
+        h = 3;
+      } else if (o._type === 2) {
+        y = layer(o._lineLayer ?? 0);
+        h = me ? meHeight(o._height ?? 5) : o._height ?? 5;
+      } else if (o._type >= 1000) {
+        const t = meWallType(o._type);
+        if (t) {
+          y = t.y;
+          h = t.h;
+        }
+      }
+      wall(o._time, lane(o._lineIndex ?? 0), y, o._duration, me ? meWidth(o._width ?? 1) : v2Pos(o._width ?? 1), h, o._customData, false);
+    }
+    for (const e of json._events || []) {
+      if (e._type === 100) raw.bpmChanges.push({ beat: e._time, bpm: e._floatValue });
+      else raw.events.push({ beat: e._time, type: e._type, value: e._value, f: e._floatValue ?? 1, cd: e._customData });
+    }
+    for (const a of json._sliders || []) {
+      arc({
+        beat: a._headTime, c: a._colorType ?? 0, x: a._headLineIndex ?? 0, y: a._headLineLayer ?? 0, d: a._headCutDirection ?? 8,
+        mu: a._headControlPointLengthMultiplier ?? 1, tb: a._tailTime, tx: a._tailLineIndex ?? 0, ty: a._tailLineLayer ?? 0,
+        tc: a._tailCutDirection ?? 8, tmu: a._tailControlPointLengthMultiplier ?? 1, m: a._sliderMidAnchorMode ?? 0,
+      }, a._customData);
+    }
+    const cd = json._customData || json.customData || {};
+    for (const c of cd._BPMChanges || cd._bpmChanges || []) {
+      raw.bpmChanges.push({ beat: c._time ?? c.b, bpm: c._BPM ?? c._bpm ?? c.m });
+    }
+    return;
+  }
+  // v3: fake objects live in customData's fake* arrays (Noodle only)
+  const cd = json.customData || {};
+  const list = (k) => (Array.isArray(json[k]) ? json[k] : []);
+  const fakes = (k) => (np && Array.isArray(cd[k]) ? cd[k] : []);
+  for (const [arr, fake] of [[list('colorNotes'), false], [fakes('fakeColorNotes'), true]]) {
+    for (const n of arr) note(n.b, n.x, n.y, n.c === 1 ? 1 : 0, n.d ?? 8, n.a ?? 0, n.customData, fake);
+  }
+  for (const [arr, fake] of [[list('bombNotes'), false], [fakes('fakeBombNotes'), true]]) {
+    for (const n of arr) note(n.b, n.x, n.y, 3, 8, 0, n.customData, fake);
+  }
+  for (const [arr, fake] of [[list('obstacles'), false], [fakes('fakeObstacles'), true]]) {
+    for (const o of arr) {
+      wall(o.b, lane(o.x ?? 0), layer(o.y ?? 0), o.d ?? 0, me ? meWidth(o.w ?? 1) : o.w ?? 1, me ? meHeight(o.h ?? 5) : o.h ?? 5, o.customData, fake);
+    }
+  }
+  for (const [arr, fake] of [[list('burstSliders'), false], [fakes('fakeBurstSliders'), true]]) {
+    for (const s of arr) chain(s, fake);
+  }
+  for (const a of list('sliders')) {
+    arc({ beat: a.b, c: a.c ?? 0, x: a.x ?? 0, y: a.y ?? 0, d: a.d ?? 8, mu: a.mu ?? 1, tb: a.tb, tx: a.tx ?? 0, ty: a.ty ?? 0, tc: a.tc ?? 8, tmu: a.tmu ?? 1, m: a.m ?? 0 }, a.customData);
+  }
+  for (const e of list('basicBeatmapEvents')) raw.events.push({ beat: e.b ?? 0, type: e.et ?? 0, value: e.i ?? 0, f: e.f ?? 1, cd: e.customData });
+  for (const e of list('colorBoostBeatmapEvents')) raw.events.push({ beat: e.b ?? 0, type: 5, value: e.o ? 1 : 0, f: 1 });
+  for (const e of list('bpmEvents')) raw.bpmChanges.push({ beat: e.b ?? 0, bpm: e.m });
+}
+
+/**
+ * Per-object jump values for the modchart runtime (nd.njsV / nd.hj: the object's NJS and
+ * half jump duration in seconds) and each note's start layer (`sl`: its index from the bottom
+ * among the notes in its column at the same beat, where its jump starts; Heck's
+ * startNoteLineLayer).
+ */
+function prepareModded(notes, walls, njs, offset, bpm) {
+  const base = halfJumpFor(njs, offset, bpm);
+  const jump = (o) => {
+    const nd = o.nd;
+    if (!nd) return;
+    nd.njsV = nd.njs ?? njs;
+    nd.hj = nd.njs == null && nd.offset == null ? base : halfJumpFor(nd.njsV, nd.offset ?? offset, bpm);
+  };
+  let i = 0;
+  while (i < notes.length) {
+    let k = i;
+    while (k < notes.length && notes[k].beat === notes[i].beat) k++;
+    const cols = new Map();
+    for (let j = i; j < k; j++) {
+      const n = notes[j];
+      jump(n);
+      if (!cols.has(n.x)) cols.set(n.x, []);
+      cols.get(n.x).push(n);
+    }
+    for (const col of cols.values()) {
+      col.sort((a, b) => a.y - b.y);
+      col.forEach((n, idx) => {
+        n.sl = idx;
+      });
+    }
+    i = k;
+  }
+  for (const w of walls) jump(w);
 }
 
 // Expands a chain (burst slider) into link pieces following the game's quadratic curve
@@ -329,7 +532,7 @@ export function computeMaxScore(notes) {
   let mult = 1;
   let progress = 0;
   for (const n of notes) {
-    if (n.kind === 'bomb') continue;
+    if (n.kind === 'bomb' || n.fake) continue; // fake notes (modcharts) are never scored
     score += (n.kind === 'link' ? 20 : 115) * mult;
     if (mult < 8) {
       progress++;

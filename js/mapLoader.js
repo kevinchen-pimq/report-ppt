@@ -1,6 +1,7 @@
 // Loads a Beat Saber map (zip archive or folder) and parses Info.dat.
 // Supports Info.dat v2.x and v4.x formats.
 import { unzip, unzipSync, strFromU8 } from 'fflate';
+import { modListed } from './noodle.js';
 
 const DIFF_ORDER = ['Easy', 'Normal', 'Hard', 'Expert', 'ExpertPlus'];
 
@@ -127,6 +128,8 @@ export function parseInfo(files) {
         customColors: customColorsV2(d.customData),
         environment: (raw.environmentNames || [])[d.environmentNameIdx ?? 0] || null,
         chroma: chromaMod(d.customData),
+        noodle: modListed(d.customData, 'Noodle Extensions'),
+        me: modListed(d.customData, 'Mapping Extensions'),
       });
     }
     const mappers = new Set();
@@ -173,6 +176,8 @@ export function parseInfo(files) {
           customColors: customColorsV2(d._customData),
           environment: (raw._environmentNames || [])[d._environmentNameIdx ?? -1] || raw._environmentName || null,
           chroma: chromaMod(d._customData),
+          noodle: modListed(d._customData, 'Noodle Extensions'), // 'required' | 'suggested' | null
+          me: modListed(d._customData, 'Mapping Extensions'),
         })),
       })),
     };

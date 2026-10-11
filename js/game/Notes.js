@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { NoteStyle, createEdgeGlowMaterial, wallStyleParams, ARROW_PLANE, arrowTexture, dotTexture } from './Models.js';
+import { NoteStyle, createEdgeGlowMaterial, createInstancedEdgeGlowMaterial, wallStyleParams, ARROW_PLANE, arrowTexture, dotTexture } from './Models.js';
+import { NoodleField } from './NoodleField.js';
 import {
   NOTE_SIZE, COLOR_LEFT, COLOR_RIGHT, COLOR_WALL, WALL_UNIT, LANE_W,
   laneX, layerY, noteRotation, rotationToDir, getHeightOffset,
@@ -107,6 +108,9 @@ export class NoteManager {
 
     this.wallGeo = new THREE.BoxGeometry(1, 1, 1);
     this.wallMat = createEdgeGlowMaterial({ color: COLOR_WALL, ...wallStyleParams('translucent') });
+    this.wallInstMat = null; // modchart walls (instanced, made on first use)
+    this.field = null; // modchart maps: NoodleField plays the notes and walls
+    this.poolPrefix = ''; // 'n' while a modchart map plays (its objects have an extra roll level)
 
     // Chroma object colours (setting): extra note style slots / bomb / wall materials per colour
     this.chroma = false;
@@ -197,6 +201,7 @@ export class NoteManager {
 
   setColors(left, right, obstacle = COLOR_WALL) {
     this.wallMat.uniforms.color.value.set(obstacle);
+    if (this.wallInstMat) this.wallInstMat.uniforms.color.value.set(obstacle);
     this.colors[0].set(left);
     this.colors[1].set(right);
     this.style.setColors(this.colors[0], this.colors[1]);
@@ -220,8 +225,23 @@ export class NoteManager {
     this.style.setColors(this.colors[0], this.colors[1]);
   }
 
+  /** The instanced edge-glow material of modchart walls (follows the wall colour and style). */
+  instancedWallMaterial() {
+    if (!this.wallInstMat) {
+      const u = this.wallMat.uniforms;
+      this.wallInstMat = createInstancedEdgeGlowMaterial({ color: u.color.value.getHex(), fill: u.fill.value, edge: u.edge.value, intensity: u.intensity.value });
+    }
+    return this.wallInstMat;
+  }
+
   setWallStyle(style) {
     const p = wallStyleParams(style);
+    if (this.wallInstMat) {
+      const iu = this.wallInstMat.uniforms;
+      iu.fill.value = p.fill;
+      iu.edge.value = p.edge;
+      iu.intensity.value = p.intensity;
+    }
     const u = this.wallMat.uniforms;
     u.fill.value = p.fill;
     u.edge.value = p.edge;
@@ -241,6 +261,7 @@ export class NoteManager {
       for (const w of this.activeWalls) this.releaseWall(w);
       this.activeWalls = [];
     }
+    if (!walls) this.field?.clearWalls();
     if (!bombs) {
       for (let i = this.active.length - 1; i >= 0; i--) {
         if (this.active[i].kind !== 'bomb') continue;
@@ -252,8 +273,8 @@ export class NoteManager {
 
   /** color: the style slot for notes / links; for bombs a Chroma colour (0xRRGGBB) or -1. */
   poolKey(kind, color) {
-    if (kind === 'bomb') return color >= 0 ? `bomb:${color}` : 'bomb';
-    return `${kind}${color}`;
+    if (kind === 'bomb') return `${this.poolPrefix}${color >= 0 ? `bomb:${color}` : 'bomb'}`;
+    return `${this.poolPrefix}${kind}${color}`;
   }
 
   reset(map) {
@@ -261,6 +282,10 @@ export class NoteManager {
     for (const w of this.activeWalls) this.releaseWall(w);
     this.active = [];
     this.activeWalls = [];
+    if (this.field) {
+      this.field.dispose();
+      this.field = null;
+    }
     this.map = map;
     this.noteIdx = 0;
     this.wallIdx = 0;
@@ -276,6 +301,14 @@ export class NoteManager {
       this.jumpDist = this.njs * map.halfJump; // half jump distance
       this.spawnLead = map.halfJump + MOVE_TIME;
     }
+    // modcharts (Noodle Extensions / Mapping Extensions): NoodleField moves every object
+    this.poolPrefix = map && map.noodle ? 'n' : '';
+    if (map && map.noodle) {
+      this.field = new NoodleField(this, map);
+      let lead = this.spawnLead;
+      for (const n of map.notes) if (n.nd && n.nd.hj) lead = Math.max(lead, n.nd.hj + MOVE_TIME);
+      this.spawnLead = lead; // practice jumps start this much earlier
+    }
   }
 
   /**
@@ -284,6 +317,10 @@ export class NoteManager {
    * notes from `from` on, walls still running at `from` (spawned now when already in view).
    */
   seek(t, from = t) {
+    if (this.field) {
+      this.field.seek(t, from); // also puts the Noodle tracks / custom events at t
+      return;
+    }
     for (const o of this.active) this.release(o);
     for (const w of this.activeWalls) this.releaseWall(w);
     this.active.length = 0;
@@ -352,12 +389,14 @@ export class NoteManager {
       const built = this.style.buildLink(color);
       group.add(built.group);
       obj.body = built.body;
+      obj.bodyRoot = built.group;
       obj.dot = new THREE.Mesh(this.linkDotGeo, this.style.coloredSymbols ? this.colorDotMats[color] : this.dotMat);
       group.add(obj.dot);
     } else {
       const built = this.style.buildNote(color);
       group.add(built.group);
       obj.body = built.body;
+      obj.bodyRoot = built.group;
       const colored = this.style.coloredSymbols;
       obj.arrow = new THREE.Mesh(this.arrowGeo, colored ? this.colorArrowMats[color] : this.symbolMat);
       obj.dot = new THREE.Mesh(this.dotGeo, colored ? this.colorDotMats[color] : this.dotMat);
@@ -368,7 +407,7 @@ export class NoteManager {
 
   release(obj) {
     obj.group.visible = false;
-    this.root.remove(obj.group);
+    obj.group.removeFromParent(); // the root, or a Noodle track parent
     (this.pools[obj.key] || (this.pools[obj.key] = [])).push(obj);
   }
 
@@ -442,6 +481,10 @@ export class NoteManager {
 
   update(t, dt, sabers, autoplay) {
     if (!this.map) return;
+    if (this.field) {
+      this.field.update(t, dt, sabers, autoplay);
+      return;
+    }
     // NJS events change the travel speed; the reaction time (half jump duration) stays fixed
     this.njs = this.map.njsAt(t);
     this.jumpDist = this.njs * this.halfJump;
@@ -520,6 +563,7 @@ export class NoteManager {
 
   /** True if a head position is inside any wall. */
   headInWall(head) {
+    if (this.field) return this.field.headInWall(head);
     for (const w of this.activeWalls) {
       if (head.z > w.zBack && head.z < w.zFront &&
           Math.abs(head.x - w.cx) < w.width / 2 &&
@@ -599,7 +643,7 @@ export class NoteManager {
     const note = obj.note;
     obj.done = true;
     obj.cut = true;
-    const p = obj.group.position;
+    const p = obj.wp || obj.group.position; // modchart notes: world position (may hang under a track parent)
     const { good, reason, speed, autoplay } = res;
     _vel.copy(res.vel);
 
@@ -618,6 +662,7 @@ export class NoteManager {
     this.effects.spawnDebris(obj.body, this.style.debrisLayers(slot, obj.kind === 'link'), _n, cutDirW, noteVel);
     this.effects.spawnSparks(p, color, good ? 30 : 12, 3, cutDirW);
 
+    if (note.fake) return; // modchart fake notes: cut for show, never scored
     if (good) this.cb.onCut(note, saber, { distance: dist, autoplay, cutDir: cutDirW.clone(), position: p.clone() });
     else this.cb.onBadCut(note, saber, reason, p.clone());
   }
@@ -630,7 +675,7 @@ export class NoteManager {
     let i = Math.max(0, this.noteIdx - 64);
     for (; i < notes.length && out.length < max; i++) {
       const n = notes[i];
-      if (n.kind === 'bomb' || n.color !== colorIdx) continue;
+      if (n.kind === 'bomb' || n.fake || n.color !== colorIdx) continue;
       if (n.time < t - 0.3) continue;
       out.push(n);
     }

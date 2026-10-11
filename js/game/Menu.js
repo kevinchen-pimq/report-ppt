@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { UIPanel, THEME, roundRect } from './ui/UIPanel.js';
 import { settings, RANGES } from '../settings.js';
 import { searchMaps, searchPlaylists, latestVersion } from '../beatsaver.js';
-import { diffName, defaultSetIndex, mapStats } from '../library.js';
+import { diffName, defaultSetIndex, mapStats, modTags } from '../library.js';
 import { downloads } from '../downloads.js';
 import { DIFF_NAMES } from '../mapLoader.js';
 import { SABER_STYLES, NOTE_STYLES, WALL_STYLES, buildSaberVisual } from './Models.js';
@@ -70,7 +70,15 @@ export class Menu {
     this.preview.visible = false;
     game.scene.add(this.preview);
 
-    settings.subscribe(() => this.panel.invalidate());
+    let noodle = settings.get('noodle');
+    settings.subscribe((v) => {
+      // the song page's stats follow the modchart setting
+      if (v.noodle !== noodle) {
+        noodle = v.noodle;
+        if (this.song?.preview && !this.song.entry?.stub) this.previewDiff();
+      }
+      this.panel.invalidate();
+    });
     this.library.subscribe(() => this.panel.invalidate());
     game.playlists?.subscribe(() => this.panel.invalidate());
     downloads.subscribe(() => this.panel.invalidate());
@@ -786,7 +794,7 @@ export class Menu {
   previewDiff() {
     const s = this.song;
     try {
-      s.preview = this.library.loadDifficulty(s.entry, s.setIdx, s.diffIdx);
+      s.preview = this.library.loadDifficulty(s.entry, s.setIdx, s.diffIdx, { noodle: settings.get('noodle') !== false });
       s.error = '';
       // start loading the environment this difficulty uses
       const env = resolveEnvironment(s.preview.meta.environment, settings.get('environment'));
@@ -843,6 +851,7 @@ export class Menu {
       if (m.njsEvents) extra.push(`NJS 變速事件 ${m.njsEvents}`);
       if (s.preview.meta.colors) extra.push(settings.get('useMapColors') ? '使用譜面自訂顏色' : '譜面有自訂顏色（已停用）');
       if (s.preview.meta.chroma) extra.push(settings.get('chroma') ? 'Chroma' : 'Chroma（已停用）');
+      for (const tag of modTags(s.preview.meta, settings.get('noodle') !== false)) extra.push(tag);
       p.text(`NJS ${m.njs} · NPS ${st.nps} · 譜面格式 v${m.version}${extra.length ? ` · ${extra.join(' · ')}` : ''}`, CX, 518, { size: 26, color: THEME.muted, maxWidth: CW });
       if (s.preview.meta.colors) this.colorSwatches(p, s.preview.meta.colors, CX, 545);
     } else if (s.error) p.text(`難度解析失敗：${s.error}`, CX, 500, { size: 26, color: THEME.red });
@@ -900,16 +909,17 @@ export class Menu {
       ['set-auto', '自動遊玩', 'autoplay'],
       ['set-mapcolors', '譜面自訂顏色', 'useMapColors'],
       ['set-chroma', 'Chroma 燈光與顏色', 'chroma'],
+      ['set-noodle', 'Noodle 特效譜面', 'noodle'],
       ['set-walls', '顯示牆壁', 'showWalls'],
       ['set-bombs', '顯示炸彈', 'showBombs'],
       ['set-debris', '顯示切開的方塊', 'showDebris'],
     ];
-    toggles.forEach(([id, label, key], i) => this.toggleRow(p, id, L, 95 + i * 66, label, key));
-    p.text('電腦螢幕觀戰', L, 607, { size: 30 });
+    toggles.forEach(([id, label, key], i) => this.toggleRow(p, id, L, 95 + i * 62, label, key));
+    p.text('電腦螢幕觀戰', L, 627, { size: 30 });
     [['third', '第三人稱'], ['first', '第一人稱'], ['off', '關閉']].forEach(([m, label], i) => {
-      p.button(`set-spec-${m}`, L + i * 152, 625, 142, 60, label, { size: 24, active: settings.get('spectator') === m, onClick: () => settings.set({ spectator: m }) });
+      p.button(`set-spec-${m}`, L + i * 152, 641, 142, 58, label, { size: 24, active: settings.get('spectator') === m, onClick: () => settings.set({ spectator: m }) });
     });
-    p.text('光劍顏色可在網頁設定中更改', L, 725, { size: 22, color: THEME.muted });
+    p.text('光劍顏色可在網頁設定中更改', L, 728, { size: 22, color: THEME.muted });
 
     const pct = (v) => `${Math.round(v * 100)}%`;
     this.stepperRow(p, 'set-vol', R, 95, '音樂音量', 'volume', pct);

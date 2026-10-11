@@ -1,7 +1,7 @@
 import { Game } from './game/Game.js';
 import { ENV_MODULES, environmentText, preloadEnvModule, resolveEnvironment } from './game/Environment.js';
 import { settings, DEFAULTS } from './settings.js';
-import { Library, diffName, defaultSetIndex, mapStats } from './library.js';
+import { Library, diffName, defaultSetIndex, mapStats, modTags } from './library.js';
 import { searchMaps, mapById, latestVersion, download, searchPlaylists, parsePlaylistId } from './beatsaver.js';
 import { Playlists } from './playlists.js';
 import { DIFF_NAMES } from './mapLoader.js';
@@ -100,7 +100,7 @@ $('now-cover').addEventListener('click', (ev) => {
 
 // ---------------------------------------------------------------------------
 // Settings (shared with the in-VR menu through the settings store)
-const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'chroma', 'saberFlip', 'showWalls', 'showBombs', 'showDebris', 'showFps'];
+const CHECKS = ['noFail', 'autoplay', 'useMapColors', 'chroma', 'noodle', 'saberFlip', 'showWalls', 'showBombs', 'showDebris', 'showFps'];
 const SELECTS = ['spectator', 'saberModel', 'noteModel', 'wallStyle', 'environment'];
 // scene choices: auto / default (in the markup), then every environment that has a module
 for (const { name, label } of ENV_MODULES) {
@@ -136,10 +136,16 @@ const stylePreview = new StylePreview($('style-preview'), { getCustom: () => gam
 
 syncSettingsUI(settings.all);
 stylePreview.update(settings.all);
+let lastNoodle = settings.get('noodle');
 settings.subscribe((v) => {
   syncSettingsUI(v);
   stylePreview.update(v);
   syncEnvLine();
+  // the song page's stats / Noodle tag follow the modchart setting
+  if (v.noodle !== lastNoodle) {
+    lastNoodle = v.noodle;
+    if (current?.preview && !current.entry?.stub) previewDiff();
+  }
 });
 for (const k of CHECKS) $(`opt-${k}`).addEventListener('change', (e) => settings.set({ [k]: e.target.checked }));
 for (const k of Object.keys(RANGES_UI)) $(`opt-${k}`).addEventListener('input', (e) => settings.set({ [k]: Number(e.target.value) }));
@@ -964,7 +970,7 @@ function renderSets() {
 
 function previewDiff() {
   try {
-    const p = library.loadDifficulty(current.entry, current.setIdx, current.diffIdx);
+    const p = library.loadDifficulty(current.entry, current.setIdx, current.diffIdx, { noodle: settings.get('noodle') !== false });
     current.preview = p;
     const m = p.map;
     const st = mapStats(m);
@@ -972,6 +978,7 @@ function previewDiff() {
     if (m.njsEvents) text += ` · NJS 變速事件 ${m.njsEvents}`;
     if (p.meta.colors) text += ' · 有自訂顏色';
     if (p.meta.chroma) text += settings.get('chroma') ? ' · Chroma' : ' · Chroma（已停用）';
+    for (const tag of modTags(p.meta, settings.get('noodle') !== false)) text += ` · ${tag}`;
     if (/360|90/.test(p.set.characteristic)) text += ' · ⚠ 旋轉模式的旋轉事件會被忽略';
     $('diff-stats').textContent = text;
   } catch (e) {

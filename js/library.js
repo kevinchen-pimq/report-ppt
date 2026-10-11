@@ -217,15 +217,18 @@ export class Library {
     return buffer;
   }
 
-  /** Parses one difficulty into a playable map plus display metadata. */
-  loadDifficulty(entry, setIdx, diffIdx) {
+  /**
+   * Parses one difficulty into a playable map plus display metadata.
+   * opts.noodle: apply Noodle Extensions / Mapping Extensions (the `noodle` setting).
+   */
+  loadDifficulty(entry, setIdx, diffIdx, { noodle = false } = {}) {
     const { files, info } = entry;
     const set = info.sets[setIdx];
     const diff = set.diffs[diffIdx];
     const json = files.json(diff.file);
     const audioData = info.audioDataFile ? files.json(info.audioDataFile) : null;
     const lightshow = diff.lightshowFile ? files.json(diff.lightshowFile) : null;
-    const map = parseDifficulty(json, { info, diff, audioData, lightshow });
+    const map = parseDifficulty(json, { info, diff, audioData, lightshow, noodle });
     const meta = {
       title: info.title,
       subTitle: info.subTitle,
@@ -238,6 +241,9 @@ export class Library {
       environment: diff.environment || null, // e.g. 'TimbalandEnvironment' (Chroma light IDs)
       // Chroma: listed as a requirement / suggestion, or Chroma data in the difficulty
       chroma: diff.chroma || map.chroma.used ? { mod: diff.chroma, used: map.chroma.used, white: diff.customColors?.envWhite ?? null, whiteBoost: diff.customColors?.envWhiteBoost ?? null } : null,
+      // modchart mods listed by the difficulty: 'required' | 'suggested' | null
+      noodle: diff.noodle || null,
+      me: diff.me || null,
     };
     return { map, meta, set, diff };
   }
@@ -245,6 +251,15 @@ export class Library {
 
 export function diffName(diff) {
   return diff.label || DIFF_NAMES[diff.difficulty] || diff.difficulty;
+}
+
+/** Song page tags for the modchart mods a difficulty lists: 「Noodle」 / 「Mapping Extensions」 (on: the `noodle` setting). */
+export function modTags(meta, on = true) {
+  const off = on ? '' : '（已停用）';
+  const out = [];
+  if (meta.noodle) out.push(`Noodle${off}`);
+  if (meta.me) out.push(`Mapping Extensions${off}`);
+  return out;
 }
 
 export function defaultSetIndex(info) {
@@ -261,7 +276,7 @@ function loadImage(src) {
 }
 
 export function mapStats(map) {
-  const bombs = map.notes.filter((n) => n.kind === 'bomb').length;
+  const bombs = map.notes.filter((n) => n.kind === 'bomb' && !n.fake).length;
   const nps = map.lastTime > 0 ? (map.colorNotes / map.lastTime).toFixed(2) : '0';
   return { bombs, nps };
 }

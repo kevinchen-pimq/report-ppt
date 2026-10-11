@@ -30,7 +30,9 @@
   - 方塊、圓點方塊、角度偏移、鏈（Chain）、**弧線（Arc）**、炸彈、牆壁、基本燈光事件、色彩加強（Boost）事件
   - **NJS 變速事件**（v4 `njsEvents`，含緩動曲線）：方塊速度隨譜面變化，反應時間不變
   - **譜面自訂顏色**：v2.1 / v4 `colorSchemes`、v2 難度 `_customData`（`_colorLeft`、`_envColorLeft`、`_obstacleColor`…），可在設定中關閉
-  - **Chroma**（v2 `_customData` / v3 `customData`，可在設定中關閉）：方塊、炸彈、牆壁、弧線與鏈的顏色；燈光事件的顏色、`lightID`（依原版場景的燈數按比例對應到本遊戲的燈）、`_lightGradient` 漸層、緩動（easing）與 HSV 漸變、v3 過渡事件；光環旋轉 / 縮放（`rotation`、`step`、`prop`、`speed`、`direction`…）、雷射速度（`speed`、`direction`、`lockRotation`）；Chroma 1 的 RGB 燈光事件。場景改造（`environment`）、Noodle Extensions、Vivify 不支援（會被忽略）
+  - **Chroma**（v2 `_customData` / v3 `customData`，可在設定中關閉）：方塊、炸彈、牆壁、弧線與鏈的顏色；燈光事件的顏色、`lightID`（依原版場景的燈數按比例對應到本遊戲的燈）、`_lightGradient` 漸層、緩動（easing）與 HSV 漸變、v3 過渡事件；光環旋轉 / 縮放（`rotation`、`step`、`prop`、`speed`、`direction`…）、雷射速度（`speed`、`direction`、`lockRotation`）；Chroma 1 的 RGB 燈光事件。場景改造（`environment`）、Vivify 不支援（會被忽略）
+  - **Noodle Extensions 特效譜面**（v2 / v3，譜面需列出 Noodle Extensions，可在設定中關閉）：物件座標 `coordinates` / `_position`、世界與本地旋轉、牆壁大小 `size` / `_scale`、物件縮放、各自的 NJS / 出現時間、假物件（v2 `_fake`、v3 `fakeColorNotes` 等，看得到但不計分）、不可互動、`disableNoteGravity`、`flip`、v2 `_cutDirection` 角度、v3 `link` / `disableBadCut…`；路徑動畫（`animation`：位移、`definitePosition`、旋轉、縮放、溶解、箭頭溶解、可互動、牆壁顏色）；軌道（track）與自訂事件 `AnimateTrack`（含 `repeat`、緩動）、`AssignPathAnimation`（含過渡）、`AssignTrackParent`、`AssignPlayerToTrack`（移動玩家位置，VR 頭部追蹤照常）；點定義可內嵌或具名，支援全部緩動、`splineCatmullRom`、`lerpHSV` 與簡單的運算修飾（opAdd / opSub / opMul / opDiv）。練習模式可跳到任意時間。大量牆壁的牆面藝術譜面用一次繪製（instancing）畫出所有牆壁
+  - **Mapping Extensions**（譜面需列出 Mapping Extensions）：精確位置（±1000 以上的行列）、超出 4×3 的行列、精確切割角度（1000–1360）、精確牆寬 / 牆高與舊式牆壁高度編碼
   - **v3 / v4 群組燈光**（`lightColorEventBoxGroups`、旋轉、平移、特效群組，v4 的 Lightshow.dat）：篩選（分段、間隔與起點、分塊、隨機、上限、反向）、時間與數值分布、過渡 / 延續、頻閃、旋轉方向與圈數都支援，在有群組燈光的場景模組上播放（沒有對應場景時照舊用預設場景）；沒有群組燈光的譜面在新場景上會用基本燈光事件點亮各燈組
   - **官方場景**：譜面指定的官方場景（Info.dat 的 `environmentName`）會用重製的版本顯示（舊場景 23 個，例如 The First、Timbaland、BTS、Billie Eilish、Lady Gaga…；v3 群組燈光的新場景 19 個，例如 Weave、EDM、Lattice、Daft Punk、Metallica…，`envs/` 裡有模組檔就會自動啟用，沒有的用預設場景）。燈光、光環、雷射與各場景的特殊事件（Billie 的雨、Lady Gaga 的線圈高度、BTS 的柱子、Interscope 的車…）都會動；設定「場景」可改成永遠用預設場景或固定一個場景
   - Standard、OneSaber、NoArrows、Lawless、Lightshow 等譜面特性（360/90 度的旋轉事件會被忽略）
@@ -76,7 +78,7 @@
 | 揮劍 | 揮動控制器 | 移動滑鼠（藍劍），按住左鍵改控制紅劍 |
 | 閃避牆壁 | 移動頭部 | A / D 左右、S 蹲下 |
 
-設定（網頁與 VR 選單共用並自動儲存）：不會失敗、自動遊玩、譜面自訂顏色、Chroma 燈光與顏色、顯示牆壁 / 炸彈 / 切開的方塊（可關閉）、顯示幀率（FPS，畫面左下角，VR 裡也看得到；綠色＝順暢、黃色＝稍慢、紅色＝明顯掉幀）、
+設定（網頁與 VR 選單共用並自動儲存）：不會失敗、自動遊玩、譜面自訂顏色、Chroma 燈光與顏色、Noodle / Mapping Extensions 特效譜面、顯示牆壁 / 炸彈 / 切開的方塊（可關閉）、顯示幀率（FPS，畫面左下角，VR 裡也看得到；綠色＝順暢、黃色＝稍慢、紅色＝明顯掉幀）、
 VR 渲染解析度（50%～150%，下次進入 VR 生效；調低更順、調高更清楚）、VR 更新率（自動 / 72 / 80 / 90 / 120 Hz，依頭盔支援）、身高、音訊延遲、音量、打擊音效、
 光劍角度（光劍相對手把的傾斜）、光劍顏色、觀戰畫面、光劍 / 方塊模型、牆壁樣式、場景（自動＝依譜面 / 預設場景 / 固定一個場景）。
 
@@ -143,11 +145,14 @@ js/playlists.js         歌單：.bplist 解析、BeatSaver 歌單匯入、單�
 js/unzipWorker.js       在背景執行緒解壓縮譜面 zip，載入大譜面時不會卡住畫面
 js/mapLoader.js         zip / 資料夾讀取、Info.dat 解析（v2 / v4）、譜面自訂顏色
 js/beatmap.js           難度檔解析（v2 / v3 / v4）、BPM 時間換算、鏈與弧線、NJS 變速曲線、最高分計算、Chroma 資料與緩動曲線
+js/noodle.js            Noodle Extensions / Mapping Extensions 解析：物件資料、點定義、軌道與自訂事件
 js/beatsaver.js         BeatSaver API
 js/downloads.js         下載管理：排隊、暫停 / 繼續 / 取消、進度
 js/stylePreview.js      網頁「外觀」的 3D 預覽（光劍、方塊、牆壁）
 js/game/Game.js         遊戲主迴圈、WebXR session、控制器、桌面輸入、自動遊玩
 js/game/Notes.js        方塊 / 炸彈 / 鏈 / 牆的生成、移動、碰撞與切割判定
+js/game/NoodleField.js  特效譜面的方塊與牆壁：照 Heck 的方式移動、動畫、碰撞；牆壁用 instancing 一次畫完
+js/game/Noodle.js       特效譜面執行期：軌道屬性、路徑動畫、軌道父子、玩家軌道（任意時間可求值）
 js/game/Arcs.js         弧線的繪製與震動回饋
 js/game/Menu.js         VR 選單各頁面（歌曲庫、歌單、BeatSaver、設定、校正、開始 / 暫停 / 結算）
 js/game/ui/             Canvas 面板元件與控制器雷射指標
