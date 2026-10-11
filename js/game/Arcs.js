@@ -4,6 +4,11 @@ import { laneX, layerY, COLOR_LEFT, COLOR_RIGHT } from './constants.js';
 const MOVE_TIME = 0.4; // keep in sync with Notes.js
 const WIDTH = 0.045;
 const _chroma = new THREE.Color();
+const _now = { x: 0, y: 0 };
+const _target = { x: 0, y: 0 };
+const _p = new THREE.Vector3();
+const _seg = new THREE.Vector3();
+const _attach = new THREE.Vector3();
 
 /**
  * Arcs (sliders): glowing ribbons that guide the saber from a head note to a tail.
@@ -96,7 +101,7 @@ export class ArcManager {
     for (let k = this.active.length - 1; k >= 0; k--) {
       const obj = this.active[k];
       const arc = obj.arc;
-      if (arc.endTime < t - 0.4) {
+      if (arc.endTime <= t) {
         this.release(obj);
         this.active.splice(k, 1);
         continue;
@@ -105,15 +110,24 @@ export class ArcManager {
       const pos = obj.mesh.geometry.attributes.position;
       const cols = obj.mesh.geometry.attributes.color;
       const n = obj.n;
+      // Once the head is reached, the part already passed gathers on the saber (the point
+      // of its blade nearest the arc), like the game: the arc runs from the saber to what
+      // is still coming. Without a visible saber it gathers at the arc's own point at the player.
+      const attach = t > arc.time ? this.attachPoint(arc, t, sabers[arc.color]) : null;
       for (let i = 0; i < n; i++) {
         const s = arc.samples[i];
         const dt = s.time - t;
-        const x = laneX(s.x);
+        let x = laneX(s.x);
         const ty = layerY(s.y);
         let y;
         let z;
         let fade;
-        if (dt > halfJump) {
+        if (attach && dt <= 0) {
+          x = attach.x;
+          y = attach.y;
+          z = attach.z;
+          fade = 1;
+        } else if (dt > halfJump) {
           // not yet in its jump: collapse onto the spawn point, invisible
           z = -jumpDist;
           y = baseY;
@@ -124,7 +138,6 @@ export class ArcManager {
           const rise = Math.min(1, p * 2);
           y = baseY + (ty - baseY) * (1 - (1 - rise) * (1 - rise));
           fade = Math.min(1, (halfJump - dt) / (halfJump * 0.25));
-          if (dt < 0) fade *= Math.max(0, 1 + dt / 0.35); // fade out once passed
         }
         const f = fade * 0.75;
         pos.setXYZ(i * 2, x - WIDTH, y, z);
@@ -143,7 +156,7 @@ export class ArcManager {
       if (haptic && t >= arc.time && t <= arc.endTime) {
         const saber = sabers[arc.color];
         if (!saber || !saber.active) continue;
-        const target = this.pointAt(arc, t + 0.6 / njs);
+        const target = this.pointAt(arc, t + 0.6 / njs, _target);
         if (!target) continue;
         const d = Math.hypot(saber.tip.x - laneX(target.x), saber.tip.y - layerY(target.y));
         const now = performance.now();
@@ -155,7 +168,21 @@ export class ArcManager {
     }
   }
 
-  pointAt(arc, time) {
+  /** Where the passed part of an arc gathers: on the saber's blade, or the arc's own point at the player. */
+  attachPoint(arc, t, saber) {
+    const now = this.pointAt(arc, Math.min(t, arc.endTime), _now);
+    if (!now) return null;
+    _p.set(laneX(now.x), layerY(now.y), 0);
+    if (!saber || !saber.active) return _attach.copy(_p);
+    // closest point on the blade segment (base → tip) to the arc's current point
+    _seg.subVectors(saber.tip, saber.base);
+    const len2 = _seg.lengthSq();
+    const k = len2 > 1e-8 ? Math.max(0, Math.min(1, _p.sub(saber.base).dot(_seg) / len2)) : 0;
+    return _attach.copy(saber.base).addScaledVector(_seg, k);
+  }
+
+  /** The arc's grid position (x lane, y layer, fractional) at a song time; out = reusable target. */
+  pointAt(arc, time, out = { x: 0, y: 0 }) {
     const s = arc.samples;
     if (time < s[0].time || time > s[s.length - 1].time) return null;
     for (let i = 1; i < s.length; i++) {
@@ -163,7 +190,9 @@ export class ArcManager {
         const a = s[i - 1];
         const b = s[i];
         const f = b.time > a.time ? (time - a.time) / (b.time - a.time) : 0;
-        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+        out.x = a.x + (b.x - a.x) * f;
+        out.y = a.y + (b.y - a.y) * f;
+        return out;
       }
     }
     return null;
