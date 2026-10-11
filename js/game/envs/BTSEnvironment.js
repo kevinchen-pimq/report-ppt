@@ -10,8 +10,8 @@
 //                                             beam, left strip, right beam, right strip — odd =
 //                                             the beam rising from a pillar top, even = a neon
 //                                             strip on it; 17–18 left far beams, 19–20 right)
-//   2  left lasers ..................... 27  (9 emitters on the left pillars, near/low → far/high,
-//                                             3 beams each)
+//   2  left lasers ..................... 27  (27 emitters along the left pillars, near/low →
+//                                             far/high, one beam each shooting sideways)
 //   3  right lasers .................... 27  (mirror of 2)
 //   4  runway lights ................... 5   (1 left rail, 2 right rail, 3 left stair edge,
 //                                             4 right stair edge, 5 cross bar at the stair foot)
@@ -19,8 +19,8 @@
 // ChroMapper's community recreation (facts only); the in-group ID order is approximate.
 // Rings: two 'big' ring sets = the 30 slabs of each striped tower (event 8 "tower spin" rotates
 // them around the vertical axis). Environment event (customEvents) 9 = pillar control: the eight
-// pillars (with the beams rising from them) sink 8 m into the clouds / rise again. Lasers: the 9
-// emitters per side spin around the track axis with events 12 / 13.
+// pillars (with the beams rising from them) sink 8 m into the clouds / rise again. Lasers: the 27
+// emitters per side spin around the sideways axis with events 12 / 13 (each beam sweeps a cone).
 import { THREE, GEO, GlowBank, Rig, PropBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const D2R = Math.PI / 180;
@@ -202,17 +202,17 @@ export default {
     }
     groups[1].push(...rising, ...far[-1], ...far[1]);
 
-    // 2 / 3: 9 laser emitters per side, 3 beams each, spinning around the track axis
+    // 2 / 3: 27 laser emitters per side, one beam each, shooting sideways away from the track;
+    // events 12 / 13 spin each beam around the sideways axis, so it sweeps a cone (not a full circle)
     const lasers = { left: [], right: [] };
+    const cone = 22 * D2R;
     for (const [type, s, list] of [[2, -1, lasers.left], [3, 1, lasers.right]]) {
-      for (let k = 0; k < 9; k++) {
-        const p = rig.proxy(s * (9.0 + k * 0.12), 0.2 + k * 1.05, -42 - k * 4.6);
+      for (let k = 0; k < 27; k++) {
+        const p = rig.proxy(s * (9.0 + k * 0.04), 0.2 + k * 0.33, -42 - k * 1.42);
+        p.userData.axis = 'x';
         list.push(p);
-        for (const pitch of [6, 12, 18]) {
-          const a = pitch * D2R;
-          const m = barXYZ(0, 0, 0, s * Math.cos(a) * 160, Math.sin(a) * 160, 6, 0.06);
-          groups[type].push(lights.light([{ m }], { fat: 4, glowGain: 0.8, rig, proxy: p }));
-        }
+        const m = barXYZ(0, 0, 0, s * Math.cos(cone) * 160, Math.sin(cone) * 160, 0, 0.06);
+        groups[type].push(lights.light([{ m }], { fat: 4, glowGain: 0.8, rig, proxy: p }));
       }
     }
 
