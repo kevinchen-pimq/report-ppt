@@ -6,8 +6,6 @@ const WIDTH = 0.045;
 const _chroma = new THREE.Color();
 const _now = { x: 0, y: 0 };
 const _target = { x: 0, y: 0 };
-const _p = new THREE.Vector3();
-const _seg = new THREE.Vector3();
 const _attach = new THREE.Vector3();
 
 /**
@@ -110,9 +108,9 @@ export class ArcManager {
       const pos = obj.mesh.geometry.attributes.position;
       const cols = obj.mesh.geometry.attributes.color;
       const n = obj.n;
-      // Once the head is reached, the part already passed gathers on the saber (the point
-      // of its blade nearest the arc), like the game: the arc runs from the saber to what
-      // is still coming. Without a visible saber it gathers at the arc's own point at the player.
+      // Once the head is reached, the part already passed gathers on the saber's tip, like
+      // the game: the arc runs from the tip to what is still coming. Without a visible saber
+      // it gathers at the arc's own point at the player.
       const attach = t > arc.time ? this.attachPoint(arc, t, sabers[arc.color]) : null;
       for (let i = 0; i < n; i++) {
         const s = arc.samples[i];
@@ -168,17 +166,11 @@ export class ArcManager {
     }
   }
 
-  /** Where the passed part of an arc gathers: on the saber's blade, or the arc's own point at the player. */
+  /** Where the passed part of an arc gathers: the saber's tip, or the arc's own point at the player. */
   attachPoint(arc, t, saber) {
+    if (saber && saber.active) return _attach.copy(saber.tip);
     const now = this.pointAt(arc, Math.min(t, arc.endTime), _now);
-    if (!now) return null;
-    _p.set(laneX(now.x), layerY(now.y), 0);
-    if (!saber || !saber.active) return _attach.copy(_p);
-    // closest point on the blade segment (base → tip) to the arc's current point
-    _seg.subVectors(saber.tip, saber.base);
-    const len2 = _seg.lengthSq();
-    const k = len2 > 1e-8 ? Math.max(0, Math.min(1, _p.sub(saber.base).dot(_seg) / len2)) : 0;
-    return _attach.copy(saber.base).addScaledVector(_seg, k);
+    return now ? _attach.set(laneX(now.x), layerY(now.y), 0) : null;
   }
 
   /** The arc's grid position (x lane, y layer, fractional) at a song time; out = reusable target. */
