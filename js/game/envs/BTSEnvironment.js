@@ -20,21 +20,24 @@
 // Rings: two 'big' ring sets = the 30 slabs of each striped tower (event 8 "tower spin" rotates
 // them around the vertical axis). Environment event (customEvents) 9 = pillar control: the 4 cubes
 // per side (with the beams rising from them) jump up / drop back (maps send it in quick pairs). Lasers: the 9
-// side lights per side spin around the sideways axis with events 12 / 13 (each beam sweeps a cone).
+// side lights per side swing up / down like a wave with events 12 / 13.
 import { THREE, GEO, GlowBank, Rig, PropBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const D2R = Math.PI / 180;
 // 9 pillars per side in a row that climbs toward the logo (it reads as a staircase from the
 // player): tall square columns, and between them 4 cubes that rise / sink with event 9.
 // [x (centre, abs), z, top y, moves]  — near → far
-const PILLAR_W = 3; // column width (x)
-const PILLAR_D = 4.6; // column depth (z)
-const CUBE = 3.6; // edge of the moving cubes
+const PILLAR_W = 3.4; // column width (square, turned 45° so its top reads as a diamond)
+const CUBE = 3.6; // edge of the moving cubes (also turned 45°)
+const HALF_DIAG = Math.SQRT1_2; // corner distance of a 45°-turned square, per unit edge
 const PILLARS = Array.from({ length: 9 }, (_, i) => [6.6, -38 - i * 5.6, 1.2 + i * 1.3, i % 2 === 1]);
 const TILT_X = 28 * D2R; // pillars lean their tops toward the player (top faces visible) ...
 const TILT_Z = 8 * D2R; // ... and a little toward the track
 const JUMP = 4; // how high the cubes jump (event 9)
-/** Pose of pillar i on side s: origin = centre of its top face. */
+const WAVE_REST = 5 * D2R; // side beams: tilt up at rest ...
+const WAVE_AMP = 14 * D2R; // ... swing up / down by this much ...
+const WAVE_LAG = 0.7; // ... each one this much phase behind the one in front of it
+/** Pose of pillar i on side s: origin = centre of its top face (the 45° turn is not included). */
 function pillarPose(s, i) {
   const [x, z, top] = PILLARS[i];
   return new THREE.Matrix4()
@@ -76,8 +79,9 @@ export default {
     for (const s of [-1, 1]) {
       PILLARS.forEach(([, , top, moves], i) => {
         const h = moves ? CUBE : top + 14;
-        const g = moves ? new THREE.BoxGeometry(CUBE, CUBE, CUBE) : new THREE.BoxGeometry(PILLAR_W, h, PILLAR_D);
+        const g = moves ? new THREE.BoxGeometry(CUBE, CUBE, CUBE) : new THREE.BoxGeometry(PILLAR_W, h, PILLAR_W);
         g.translate(0, -h / 2, 0);
+        g.rotateY(45 * D2R);
         g.applyMatrix4(pillarPose(s, i));
         (moves ? pg : sg).push(g);
       });
@@ -206,8 +210,8 @@ export default {
         const a = 7 * D2R;
         const [x0, y0, z0] = pillarPoint(s, 2 * k + 1, 0, 0);
         rising.push(lights.light([{ m: barXYZ(x0, y0, z0, x0 + s * Math.sin(a) * 140, y0 + Math.cos(a) * 140, z0 - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
-        // down the column's face toward the track
-        const xe = -s * (PILLAR_W / 2 + 0.04);
+        // down the column's corner toward the track
+        const xe = -s * (PILLAR_W * HALF_DIAG + 0.04);
         const [ax, ay, az] = pillarPoint(s, 2 * k, xe, -0.2);
         rising.push(lights.light([{ m: barXYZ(ax, ay, az, ...pillarPoint(s, 2 * k, xe, -8), 0.1) }], { fat: 2 }));
       }
@@ -221,17 +225,18 @@ export default {
     groups[1].push(...rising, ...far[-1], ...far[1]);
 
     // 2 / 3: 9 side lights per side: one near the top of each pillar, near → far (those on the
-    // moving cubes rise / sink with them). One beam
-    // each, shooting sideways; 3 light IDs per light (beam, emitter glow, flare at the beam's foot).
-    // Events 12 / 13 spin each beam around the sideways axis, so it sweeps a narrow cone.
+    // moving cubes jump with them). One beam each, shooting sideways; 3 light IDs per light (beam,
+    // emitter glow, flare at the beam's foot). Events 12 / 13 make the row swing up and down like a
+    // wave: every beam follows the side's first laser, a little later the farther back it is
+    // (update() turns that phase into the tilts).
     const lasers = { left: [], right: [] };
-    const cone = 6 * D2R;
-    const beam = (s, len, w) => barXYZ(0, 0, 0, s * Math.cos(cone) * len, Math.sin(cone) * len, 0, w);
+    const beam = (s, len, w) => barXYZ(0, 0, 0, s * len, 0, 0, w);
     for (const [type, s, list] of [[2, -1, lasers.left], [3, 1, lasers.right]]) {
-      const mounts = PILLARS.map(([, , , moves], i) => [...pillarPoint(s, i, s * ((moves ? CUBE : PILLAR_W) / 2 + 0.05), moves ? -CUBE / 2 : -1), moves]);
+      const mounts = PILLARS.map(([, , , moves], i) => [...pillarPoint(s, i, s * ((moves ? CUBE : PILLAR_W) * HALF_DIAG + 0.05), moves ? -CUBE / 2 : -1), moves]);
       for (const [x, y, z, moves] of mounts) {
         const p = rig.proxy(x, y, z);
-        p.userData.axis = 'x';
+        p.userData.setPhase = () => {}; // the wave is set in update()
+        p.rotation.z = s * WAVE_REST;
         list.push(p);
         const chain = moves ? [lift, p] : p;
         groups[type].push(
@@ -266,6 +271,7 @@ export default {
 
     const banks = [...lights.banks, clouds, slabs];
     let cubesUp = false;
+    const wave = { last: [0, 0], env: [0, 0] };
     return {
       root,
       banks,
@@ -281,6 +287,8 @@ export default {
       },
       reset() {
         cubesUp = false;
+        wave.last.fill(0);
+        wave.env.fill(0);
       },
       update(t, dt) {
         const target = cubesUp ? JUMP : 0;
@@ -289,6 +297,17 @@ export default {
           lift.position.y = Math.abs(target - y) < 1e-3 ? target : y + (target - y) * (1 - Math.exp(-14 * dt));
           pillars.position.y = lift.position.y;
           pillars.updateMatrix();
+        }
+        // side beams: the wave fades in while the side's lasers move and out when they stop
+        for (let side = 0; side < 2; side++) {
+          const list = side ? lasers.right : lasers.left;
+          const s = side ? 1 : -1;
+          const ph = list[0].userData.phase || 0;
+          const moving = ph !== wave.last[side];
+          wave.last[side] = ph;
+          wave.env[side] += ((moving ? 1 : 0) - wave.env[side]) * Math.min(1, dt * 6);
+          const amp = WAVE_AMP * wave.env[side];
+          for (let i = 0; i < list.length; i++) list[i].rotation.z = s * (WAVE_REST + amp * Math.sin(ph - i * WAVE_LAG));
         }
         rig.sync();
         bounce();
