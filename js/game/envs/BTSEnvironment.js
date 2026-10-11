@@ -6,10 +6,10 @@
 //
 // Light groups (v2 basic event type → lights, Chroma lightID n = groups[type][n - 1]):
 //   0  logo ............................ 3   (1 left door, 2 right door, 3 logo reflection)
-//   1  center lasers (rising beams) .... 20  (1–8 left pillars near → far, 2 per pillar: odd =
-//                                             the beam rising from its top, even = a neon strip
-//                                             on the pillar; 9–16 right pillars, 17–18 left far
-//                                             beams, 19–20 right far beams)
+//   1  center lasers (rising beams) .... 20  (1–16 pillar rows near → far, 4 per row: left
+//                                             beam, left strip, right beam, right strip — odd =
+//                                             the beam rising from a pillar top, even = a neon
+//                                             strip on it; 17–18 left far beams, 19–20 right)
 //   2  left lasers ..................... 27  (9 emitters on the left pillars, near/low → far/high,
 //                                             3 beams each)
 //   3  right lasers .................... 27  (mirror of 2)
@@ -179,18 +179,19 @@ export default {
     }
     groups[0].push(leftDoor, rightDoor, refl);
 
-    // 1: rising beams from the pillar tops, then far diagonal beams
-    const rising = { [-1]: [], [1]: [] };
+    // 1: rising beams from the pillar tops, then far diagonal beams. IDs go row by row, near → far:
+    // left beam, left strip, right beam, right strip (maps chase the rows with the odd IDs 1+3,
+    // 5+7, ...; the even ones stay lit from whole-group events, so they are a neon strip down the
+    // pillar's inner edge rather than a beam)
+    const rising = [];
     const lift = rig.proxy(0, 0, 0); // pillar height (event 9); the rising beams follow it
-    for (const s of [-1, 1]) {
-      for (const [x, z, top] of PILLARS) {
-        // odd ID: the beam rising from the top; even ID: a neon strip down the pillar's inner edge
-        // (maps chase the beams with the odd IDs only, the even ones stay lit from "all" events)
+    for (const [x, z, top] of PILLARS) {
+      for (const s of [-1, 1]) {
         const a = 7 * D2R;
         const x0 = s * x;
-        rising[s].push(lights.light([{ m: barXYZ(x0, top, z, x0 + s * Math.sin(a) * 140, top + Math.cos(a) * 140, z - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
+        rising.push(lights.light([{ m: barXYZ(x0, top, z, x0 + s * Math.sin(a) * 140, top + Math.cos(a) * 140, z - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
         const xe = s * (x - 1.84 - 0.04); // the diamond's corner facing the track
-        rising[s].push(lights.light([{ m: barXYZ(xe, top - 0.2, z, xe, top - 10, z, 0.1) }], { fat: 2, rig, proxy: lift }));
+        rising.push(lights.light([{ m: barXYZ(xe, top - 0.2, z, xe, top - 10, z, 0.1) }], { fat: 2, rig, proxy: lift }));
       }
     }
     const far = { [-1]: [], [1]: [] };
@@ -199,7 +200,7 @@ export default {
         far[s].push(lights.light([{ m: barXYZ(s * 26, y, -150, s * 150, y + 18, -30, 0.25) }], { fat: 4, glowGain: 0.7 }));
       }
     }
-    groups[1].push(...rising[-1], ...rising[1], ...far[-1], ...far[1]);
+    groups[1].push(...rising, ...far[-1], ...far[1]);
 
     // 2 / 3: 9 laser emitters per side, 3 beams each, spinning around the track axis
     const lasers = { left: [], right: [] };
