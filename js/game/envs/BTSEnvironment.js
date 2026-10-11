@@ -37,9 +37,10 @@ const TILT_X = 28 * D2R; // pillars lean their tops toward the player (top faces
 const TILT_Z = 8 * D2R; // ... and a little toward the track
 const JUMP = 3; // how high the cubes jump (every event 9 is one jump)
 const JUMP_KICK = 0.09; // seconds the cubes are pushed up per jump
-const WAVE_REST = 5 * D2R; // side beams: tilt up at rest ...
-const WAVE_AMP = 8 * D2R; // ... swing up / down by this much ...
-const WAVE_LAG = 0.3; // ... each one this much phase behind the one in front of it
+const WAVE_REST = 1 * D2R; // side beams: the front one tilts up this much at rest, ...
+const WAVE_FAN = 1.6 * D2R; // ... each one behind it this much more (an even fan), ...
+const WAVE_AMP = 6 * D2R; // ... the row swings up / down by this much, ...
+const WAVE_LAG = 0.12; // ... each beam this much phase behind the one in front of it
 /** Pose of pillar i on side s: origin = centre of its top face (the 45° turn is not included). */
 function pillarPose(s, i) {
   const [x, z, top] = PILLARS[i];
@@ -233,11 +234,11 @@ export default {
     const lasers = { left: [], right: [] };
     const beam = (s, len, w) => barXYZ(0, 0, 0, s * len, 0, 0, w);
     for (const [type, s, list] of [[2, -1, lasers.left], [3, 1, lasers.right]]) {
-      const mounts = PILLARS.map(([, , , moves], i) => [...pillarPoint(s, i, s * ((moves ? CUBE : PILLAR_W) * HALF_DIAG + 0.05), moves ? -CUBE / 2 : -1), moves]);
+      const mounts = PILLARS.map(([, , , moves], i) => [...pillarPoint(s, i, s * ((moves ? CUBE : PILLAR_W) * HALF_DIAG + 0.05), -0.9), moves]);
       for (const [x, y, z, moves] of mounts) {
         const p = rig.proxy(x, y, z);
         p.userData.setPhase = () => {}; // the wave is set in update()
-        p.rotation.z = s * WAVE_REST;
+        p.rotation.z = s * (WAVE_REST + list.length * WAVE_FAN);
         list.push(p);
         const chain = moves ? [lift, p] : p;
         groups[type].push(
@@ -308,7 +309,7 @@ export default {
           wave.last[side] = ph;
           wave.env[side] += ((moving ? 1 : 0) - wave.env[side]) * Math.min(1, dt * 6);
           const amp = WAVE_AMP * wave.env[side];
-          for (let i = 0; i < list.length; i++) list[i].rotation.z = s * (WAVE_REST + amp * Math.sin(ph - i * WAVE_LAG));
+          for (let i = 0; i < list.length; i++) list[i].rotation.z = s * (WAVE_REST + i * WAVE_FAN + amp * Math.sin(ph - i * WAVE_LAG));
         }
         rig.sync();
         bounce();
