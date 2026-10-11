@@ -6,34 +6,32 @@
 //
 // Light groups (v2 basic event type → lights, Chroma lightID n = groups[type][n - 1]):
 //   0  logo ............................ 3   (1 left door, 2 right door, 3 logo reflection)
-//   1  center lasers (rising beams) .... 20  (1–16 pillar rows near → far, 4 per row: left
+//   1  center lasers (rising beams) .... 20  (1–16 pillar pairs near → far, 4 per pair: left
 //                                             beam, left strip, right beam, right strip — odd =
-//                                             the beam rising from a pillar top, even = a neon
-//                                             strip on it; 17–18 left far beams, 19–20 right)
+//                                             the beam rising from the moving pillar's top, even =
+//                                             a neon strip on the fixed one; 17–20 far beams)
 //   2  left lasers ..................... 27  (9 side lights × 3 IDs: beam, emitter glow, flare;
-//                                             front block, then per pillar near → far a fixed
-//                                             light and one moving with the pillar)
+//                                             front block, then one per pillar near → far)
 //   3  right lasers .................... 27  (mirror of 2)
 //   4  runway lights ................... 5   (1 left rail, 2 right rail, 3 left stair edge,
 //                                             4 right stair edge, 5 cross bar at the stair foot)
 // Counts: Chroma's light ID table for BTSEnvironment (Aeroluna/Heck). Layout and rough positions:
 // ChroMapper's community recreation (facts only); the in-group ID order is approximate.
 // Rings: two 'big' ring sets = the 30 slabs of each striped tower (event 8 "tower spin" rotates
-// them around the vertical axis). Environment event (customEvents) 9 = pillar control: the eight
-// pillars (with the beams rising from them) sink 8 m into the clouds / rise again. Lasers: the 9
+// them around the vertical axis). Environment event (customEvents) 9 = pillar control: every second
+// pillar (with the beams rising from it) sinks 8 m into the clouds / rises again. Lasers: the 9
 // side lights per side spin around the sideways axis with events 12 / 13 (each beam sweeps a cone).
 import { THREE, GEO, GlowBank, Rig, PropBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const D2R = Math.PI / 180;
-const PILLARS = [
-  // [x (abs), z, top y]  — near → far
-  [7.2, -46, 4.5],
-  [7.6, -56, 6.5],
-  [8.0, -66, 8.5],
-  [8.4, -76, 10.5],
-];
-const FRONT_X = 7.0; // block in front of the pillars
-const FRONT_Z = -38;
+// 8 square pillars per side packed into a row that climbs toward the logo (it reads as a
+// staircase from the player); every second one rises / sinks with event 9.
+// [x (centre, abs), z, top y, moves]  — near → far
+const PILLAR_W = 3; // across (x)
+const PILLAR_D = 5.4; // along the track (z)
+const PILLARS = Array.from({ length: 8 }, (_, i) => [6.6, -44 - i * 5.8, 2 + i * 1.4, i % 2 === 1]);
+const FRONT_X = 6.6; // block in front of the pillars
+const FRONT_Z = -37.5;
 const LOGO_Z = -90;
 const LOGO_Y = 10;
 
@@ -61,16 +59,15 @@ export default {
     const sg = [];
     const pg = []; // the pillars move (event 9): own mesh
     for (const s of [-1, 1]) {
-      for (const [x, z, top] of PILLARS) {
+      for (const [x, z, top, moves] of PILLARS) {
         const h = top + 14;
-        const g = new THREE.BoxGeometry(2.6, h, 2.6);
-        g.rotateY(45 * D2R);
+        const g = new THREE.BoxGeometry(PILLAR_W, h, PILLAR_D);
         g.translate(s * x, top - h / 2, z);
-        pg.push(g);
+        (moves ? pg : sg).push(g);
       }
       // the block in front of the pillar row (carries a side light)
-      const fb = new THREE.BoxGeometry(2.2, 6, 2.2);
-      fb.translate(s * FRONT_X, 1.4 + 1 - 3, FRONT_Z);
+      const fb = new THREE.BoxGeometry(2.4, 6, 2.4);
+      fb.translate(s * FRONT_X, 1.2 - 3, FRONT_Z);
       sg.push(fb);
       // big blocks flanking the logo
       const b = new THREE.BoxGeometry(3.6, 30, 5);
@@ -186,19 +183,21 @@ export default {
     }
     groups[0].push(leftDoor, rightDoor, refl);
 
-    // 1: rising beams from the pillar tops, then far diagonal beams. IDs go row by row, near → far:
-    // left beam, left strip, right beam, right strip (maps chase the rows with the odd IDs 1+3,
-    // 5+7, ...; the even ones stay lit from whole-group events, so they are a neon strip down the
-    // pillar's inner edge rather than a beam)
+    // 1: rising beams, then far diagonal beams. IDs go by pillar pair, near → far: left beam, left
+    // strip, right beam, right strip (maps chase the pairs with the odd IDs 1+3, 5+7, ...; the even
+    // ones stay lit from whole-group events, so they are a neon strip on the pillar, not a beam).
+    // The beam rises from the moving pillar of the pair, the strip runs down the fixed one.
     const rising = [];
-    const lift = rig.proxy(0, 0, 0); // pillar height (event 9); the rising beams follow it
-    for (const [x, z, top] of PILLARS) {
+    const lift = rig.proxy(0, 0, 0); // height of the moving pillars (event 9)
+    for (let k = 0; k < 4; k++) {
+      const [fx, fz, ftop] = PILLARS[2 * k];
+      const [mx, mz, mtop] = PILLARS[2 * k + 1];
       for (const s of [-1, 1]) {
         const a = 7 * D2R;
-        const x0 = s * x;
-        rising.push(lights.light([{ m: barXYZ(x0, top, z, x0 + s * Math.sin(a) * 140, top + Math.cos(a) * 140, z - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
-        const xe = s * (x - 1.84 - 0.04); // the diamond's corner facing the track
-        rising.push(lights.light([{ m: barXYZ(xe, top - 0.2, z, xe, top - 10, z, 0.1) }], { fat: 2, rig, proxy: lift }));
+        const x0 = s * mx;
+        rising.push(lights.light([{ m: barXYZ(x0, mtop, mz, x0 + s * Math.sin(a) * 140, mtop + Math.cos(a) * 140, mz - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
+        const xe = s * (fx - PILLAR_W / 2 - 0.04); // the fixed pillar's face toward the track
+        rising.push(lights.light([{ m: barXYZ(xe, ftop - 0.2, fz, xe, ftop - 8, fz, 0.1) }], { fat: 2 }));
       }
     }
     const far = { [-1]: [], [1]: [] };
@@ -209,18 +208,16 @@ export default {
     }
     groups[1].push(...rising, ...far[-1], ...far[1]);
 
-    // 2 / 3: 9 side lights per side: one on the block in front of the pillars, then per pillar
-    // (near → far) a fixed one low down and one near the top that rises / sinks with the pillar.
-    // One beam each, shooting sideways; 3 light IDs per light (beam, emitter glow, flare at the
-    // beam's foot). Events 12 / 13 spin each beam around the sideways axis, so it sweeps a cone.
+    // 2 / 3: 9 side lights per side: one on the block in front of the pillars, then one near the
+    // top of each pillar (near → far; those on moving pillars rise / sink with them). One beam
+    // each, shooting sideways; 3 light IDs per light (beam, emitter glow, flare at the beam's foot).
+    // Events 12 / 13 spin each beam around the sideways axis, so it sweeps a narrow cone.
     const lasers = { left: [], right: [] };
-    const cone = 22 * D2R;
+    const cone = 6 * D2R;
     const beam = (s, len, w) => barXYZ(0, 0, 0, s * Math.cos(cone) * len, Math.sin(cone) * len, 0, w);
     for (const [type, s, list] of [[2, -1, lasers.left], [3, 1, lasers.right]]) {
-      const mounts = [[s * (FRONT_X + 1.1), 1.4, FRONT_Z, false]];
-      for (const [x, z, top] of PILLARS) {
-        mounts.push([s * (x + 1.9), top * 0.4, z, false], [s * (x + 1.9), top - 1.2, z, true]);
-      }
+      const mounts = [[s * (FRONT_X + 1.25), 0.5, FRONT_Z, false]];
+      for (const [x, z, top, moves] of PILLARS) mounts.push([s * (x + PILLAR_W / 2 + 0.05), top - 1, z, moves]);
       for (const [x, y, z, moves] of mounts) {
         const p = rig.proxy(x, y, z);
         p.userData.axis = 'x';
