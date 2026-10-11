@@ -7,6 +7,7 @@ import { Playlists } from './playlists.js';
 import { DIFF_NAMES } from './mapLoader.js';
 import { StylePreview } from './stylePreview.js';
 import { downloads } from './downloads.js';
+import { initPracticeUI } from './practiceUI.js';
 
 const $ = (id) => document.getElementById(id);
 const menu = $('menu');
@@ -30,6 +31,7 @@ const game = new Game($('scene'), {
 });
 
 let current = null; // { entry, setIdx, diffIdx, preview }
+const practiceUI = initPracticeUI(game, () => current); // 練習模式 options + bar while playing
 
 // ---------------------------------------------------------------------------
 // Status line
@@ -979,6 +981,7 @@ function previewDiff() {
   }
   syncEnvLine();
   updateButtons();
+  practiceUI.sync();
 }
 
 /** Song page: the environment the selected difficulty will be shown in (and start loading it). */
@@ -1036,7 +1039,7 @@ function showResult(r) {
   el.hidden = false;
   el.innerHTML = '';
   const h = document.createElement('h2');
-  h.textContent = `${r.failed ? '挑戰失敗' : '完成'}：${r.title} · ${r.characteristic} ${r.difficulty}`;
+  h.textContent = `${r.practice ? '練習結束' : r.failed ? '挑戰失敗' : '完成'}：${r.title} · ${r.characteristic} ${r.difficulty}`;
   const rank = document.createElement('div');
   rank.className = 'rank';
   rank.textContent = `${r.rank}  ${r.percent.toFixed(2)}%`;
@@ -1044,6 +1047,7 @@ function showResult(r) {
   stats.className = 'stats';
   const items = [`分數 ${r.score.toLocaleString('en-US')}`, `最大連擊 ${r.maxCombo}`, `命中 ${r.hits}`, `Miss ${r.misses}`, `壞切 ${r.badCuts}`, `炸彈 ${r.bombHits}`];
   if (r.best) items.push(r.best.isNew ? '新紀錄！' : `最佳 ${r.best.score.toLocaleString('en-US')}`);
+  if (r.practice) items.push(`練習 · 速度 ${Math.round(r.rate * 100)}% · 不記錄成績`);
   for (const s of items) {
     const span = document.createElement('span');
     span.textContent = s;

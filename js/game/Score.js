@@ -144,6 +144,22 @@ export class ScoreKeeper {
     this.addEnergy(-1.3 * dt);
   }
 
+  /**
+   * Practice mode jump: the score so far stays (it is never saved), the streak starts over
+   * (combo, multiplier) and the energy is back to half.
+   */
+  restartStreak() {
+    this.flushPending();
+    this.combo = 0;
+    this.multiplier = 1;
+    this.progress = 0;
+    this.possibleMult = 1;
+    this.possibleProgress = 0;
+    this.energy = 0.5;
+    this.failed = false;
+    this.changed = true;
+  }
+
   breakCombo() {
     this.combo = 0;
     this.dropMultiplier();
