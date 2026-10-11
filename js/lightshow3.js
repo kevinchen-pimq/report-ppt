@@ -390,19 +390,20 @@ export class DotNetRandom {
     const MSEED = 161803398;
     this.seedArray = new Int32Array(56);
     const subtraction = seed === -2147483648 ? 2147483647 : Math.abs(seed | 0);
-    let mj = MSEED - subtraction;
+    // int arithmetic wraps like C#'s (| 0)
+    let mj = (MSEED - subtraction) | 0;
     this.seedArray[55] = mj;
     let mk = 1;
     for (let i = 1; i < 55; i++) {
       const ii = (21 * i) % 55;
       this.seedArray[ii] = mk;
-      mk = mj - mk;
+      mk = (mj - mk) | 0;
       if (mk < 0) mk += MBIG;
       mj = this.seedArray[ii];
     }
     for (let k = 1; k < 5; k++) {
       for (let i = 1; i < 56; i++) {
-        let v = this.seedArray[i] - this.seedArray[1 + ((i + 30) % 55)];
+        let v = (this.seedArray[i] - this.seedArray[1 + ((i + 30) % 55)]) | 0;
         if (v < 0) v += MBIG;
         this.seedArray[i] = v;
       }
@@ -416,7 +417,7 @@ export class DotNetRandom {
     if (a >= 56) a = 1;
     let b = this.inextp + 1;
     if (b >= 56) b = 1;
-    let ret = this.seedArray[a] - this.seedArray[b];
+    let ret = (this.seedArray[a] - this.seedArray[b]) | 0;
     if (ret === 2147483647) ret--;
     if (ret < 0) ret += 2147483647;
     this.seedArray[a] = ret;
@@ -460,7 +461,7 @@ export function filterSteps(f, n) {
     // seeded Fisher–Yates shuffle
     const rnd = new DotNetRandom(f.seed);
     for (let i = picked.length - 1; i > 0; i--) {
-      const j = rnd.next(0, i + 1);
+      const j = Math.min(i, rnd.next(0, i + 1));
       const t = picked[i];
       picked[i] = picked[j];
       picked[j] = t;

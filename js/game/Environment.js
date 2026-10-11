@@ -525,7 +525,7 @@ export class Environment {
       def,
       built,
       lighting,
-      group, // GroupLighting for the module's lightGroups (null: none)
+      group, // GroupLighting for the module's lightGroups (null: none); seek(t) via Environment.seek
       groupMode: null, // per run: 'direct' (box groups) | 'compat' (basic events on lightGroups) | 'approx' (box groups on groups)
       compat: null, // { source, lighting: ChromaLighting } basic events on the lightGroups' lights
       approx: null, // { source, lighting: GroupLighting } box groups on the basic groups' lights
@@ -608,13 +608,17 @@ export class Environment {
       if (lightshow) mod.groupMode = 'direct';
       else {
         mod.groupMode = 'compat';
-        if (!mod.compat || mod.compat.source !== events) mod.compat = { source: events, lighting: compatLighting(mod.built.lightGroups || {}, events, this.colors) };
+        if (!mod.compat || mod.compat.source !== events) {
+          const lighting = compatLighting(mod.built.lightGroups || {}, events, this.colors);
+          mod.compat = { source: events, lighting, seek: (t) => mod.groupMode === 'compat' && lighting.seek(t) };
+        }
         mod.compat.lighting.reset(events, compatStart(mod.compat.lighting, events));
       }
     } else if (this.approximateV3 && boxLit && !basicLit) {
       mod.groupMode = 'approx';
       if (!mod.approx || mod.approx.source !== lightshow) {
-        mod.approx = { source: lightshow, lighting: new GroupLighting({ lightGroups: approxLightGroups(lightshow, mod.built.groups || {}, mod.lighting.types) }, this.colors) };
+        const lighting = new GroupLighting({ lightGroups: approxLightGroups(lightshow, mod.built.groups || {}, mod.lighting.types) }, this.colors);
+        mod.approx = { source: lightshow, lighting, seek: (t) => mod.groupMode === 'approx' && lighting.seek(t, mod.lighting.boost) };
       }
       mod.approx.lighting.reset(lightshow, { chroma });
     }
@@ -736,17 +740,6 @@ export class Environment {
     } else if (e.type === 13) {
       this.laserSpeed[1] = e.value;
     }
-  }
-
-  /**
-   * Jumps the v3 group lighting (module light groups, or the approximation on our lights) to song
-   * time t: exact state at t, any direction. The per-frame update also follows a backwards jump.
-   */
-  seekGroupLighting(t) {
-    const mod = this.active;
-    if (mod?.groupMode === 'direct') mod.group.seek(t, mod.lighting.boost);
-    else if (mod?.groupMode === 'approx') mod.approx.lighting.seek(t, mod.lighting.boost);
-    else if (!mod && this.approx) this.approx.lighting.seek(t, this.chroma.boost);
   }
 
   update(t, dt) {
@@ -882,6 +875,7 @@ export class Environment {
       mod.built.seek?.(t);
     } else if (this.chromaOn) {
       this.chroma.seek(t);
+      this.approx?.lighting.seek(t, this.chroma.boost);
       this.syncLasers();
       this.syncRings();
     } else this.seekGroups(t);
