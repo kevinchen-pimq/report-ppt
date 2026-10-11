@@ -8,8 +8,8 @@
 //   0  logo ............................ 3   (1 left door, 2 right door, 3 logo reflection)
 //   1  center lasers (rising beams) .... 20  (1–16 pillar pairs near → far, 4 per pair: left
 //                                             beam, left strip, right beam, right strip — odd =
-//                                             the beam rising from a moving cube, even = a neon
-//                                             strip on the column before it; 17–20 far beams)
+//                                             the beam rising from a moving cube, even = a lamp
+//                                             on that cube's top face; 17–20 far beams)
 //   2  left lasers ..................... 27  (9 side lights × 3 IDs: beam, emitter glow, flare;
 //                                             one per pillar near → far)
 //   3  right lasers .................... 27  (mirror of 2)
@@ -19,7 +19,7 @@
 // ChroMapper's community recreation (facts only); the in-group ID order is approximate.
 // Rings: two 'big' ring sets = the 30 slabs of each striped tower (event 8 "tower spin" rotates
 // them around the vertical axis). Environment event (customEvents) 9 = pillar control: the 4 cubes
-// per side (with the beams rising from them) jump up / drop back (maps send it in quick pairs). Lasers: the 9
+// per side (with the beams rising from them) drop and spring back up (maps send it in quick pairs). Lasers: the 9
 // side lights per side swing up / down like a wave with events 12 / 13.
 import { THREE, GEO, GlowBank, Rig, PropBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
@@ -30,13 +30,18 @@ const D2R = Math.PI / 180;
 const PILLAR_W = 3.4; // column width (square, turned 45° so its top reads as a diamond)
 const CUBE = 3.6; // edge of the moving cubes (also turned 45°)
 const HALF_DIAG = Math.SQRT1_2; // corner distance of a 45°-turned square, per unit edge
-const PILLARS = Array.from({ length: 9 }, (_, i) => [6.6, -38 - i * 5.6, 1.2 + i * 1.3, i % 2 === 1]);
+// Heights: from the player the row climbs from just above eye level (front) to below the middle
+// of the logo (back) — tops at a view angle of about 1.8° → 4.5° over eye height.
+const PILLARS = Array.from({ length: 9 }, (_, i) => {
+  const z = -38 - i * 5.6;
+  return [6.6, z, 1.7 + (0.031 + 0.048 * (i / 8)) * -z, i % 2 === 1];
+});
 const TILT_X = 28 * D2R; // pillars lean their tops toward the player (top faces visible) ...
 const TILT_Z = 8 * D2R; // ... and a little toward the track
-const JUMP = 4; // how high the cubes jump (event 9)
+const JUMP = 4; // how far the cubes drop before springing back up (event 9)
 const WAVE_REST = 5 * D2R; // side beams: tilt up at rest ...
-const WAVE_AMP = 14 * D2R; // ... swing up / down by this much ...
-const WAVE_LAG = 0.7; // ... each one this much phase behind the one in front of it
+const WAVE_AMP = 8 * D2R; // ... swing up / down by this much ...
+const WAVE_LAG = 0.3; // ... each one this much phase behind the one in front of it
 /** Pose of pillar i on side s: origin = centre of its top face (the 45° turn is not included). */
 function pillarPose(s, i) {
   const [x, z, top] = PILLARS[i];
@@ -201,8 +206,8 @@ export default {
 
     // 1: rising beams, then far diagonal beams. IDs go by pillar pair, near → far: left beam, left
     // strip, right beam, right strip (maps chase the pairs with the odd IDs 1+3, 5+7, ...; the even
-    // ones stay lit from whole-group events, so they are a neon strip on the pillar, not a beam).
-    // The beam rises from the moving cube of the pair, the strip runs down the column before it.
+    // ones stay lit from whole-group events, so they are a lamp, not a beam): both sit on the top
+    // face of one of the 4 moving cubes.
     const rising = [];
     const lift = rig.proxy(0, 0, 0); // height of the moving cubes (event 9)
     for (let k = 0; k < 4; k++) {
@@ -210,10 +215,8 @@ export default {
         const a = 7 * D2R;
         const [x0, y0, z0] = pillarPoint(s, 2 * k + 1, 0, 0);
         rising.push(lights.light([{ m: barXYZ(x0, y0, z0, x0 + s * Math.sin(a) * 140, y0 + Math.cos(a) * 140, z0 - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
-        // down the column's corner toward the track
-        const xe = -s * (PILLAR_W * HALF_DIAG + 0.04);
-        const [ax, ay, az] = pillarPoint(s, 2 * k, xe, -0.2);
-        rising.push(lights.light([{ m: barXYZ(ax, ay, az, ...pillarPoint(s, 2 * k, xe, -8), 0.1) }], { fat: 2 }));
+        // a lamp on the cube's top face
+        rising.push(lights.light([{ m: barXYZ(x0, y0, z0, ...pillarPoint(s, 2 * k + 1, 0, 0.45), 0.55) }], { fat: 2.5, rig, proxy: lift }));
       }
     }
     const far = { [-1]: [], [1]: [] };
@@ -270,7 +273,7 @@ export default {
     });
 
     const banks = [...lights.banks, clouds, slabs];
-    let cubesUp = false;
+    let cubesDown = false;
     const wave = { last: [0, 0], env: [0, 0] };
     return {
       root,
@@ -283,15 +286,15 @@ export default {
       lasers,
       customEvents: [9],
       onEvent(type) {
-        if (type === 9) cubesUp = !cubesUp; // pillar control
+        if (type === 9) cubesDown = !cubesDown; // pillar control
       },
       reset() {
-        cubesUp = false;
+        cubesDown = false;
         wave.last.fill(0);
         wave.env.fill(0);
       },
       update(t, dt) {
-        const target = cubesUp ? JUMP : 0;
+        const target = cubesDown ? -JUMP : 0;
         const y = lift.position.y;
         if (y !== target) {
           lift.position.y = Math.abs(target - y) < 1e-3 ? target : y + (target - y) * (1 - Math.exp(-14 * dt));
