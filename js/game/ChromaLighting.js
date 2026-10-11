@@ -114,6 +114,7 @@ class LightState {
     this.mode = MODE_OFF;
     this.t0 = 0;
     this.k = 1; // brightness (event float value x colour alpha)
+    this.f = 1; // the event's own float value (a gradient's alpha scales this)
     this.key = KEY_R; // palette colour when not explicit
     this.explicit = false;
     this.r = 1;
@@ -238,6 +239,7 @@ export class ChromaLighting {
       for (const L of grp.lights) {
         L.mode = startOn[type] ? MODE_ON : MODE_OFF;
         L.k = startOn[type] || 1;
+        L.f = L.k;
         L.key = startLeft[type] ? KEY_L : KEY_R;
         L.explicit = false;
         L.ease = null;
@@ -472,6 +474,7 @@ export class ChromaLighting {
       L.dirty = true;
       if (kind === 0) continue;
       L.key = key;
+      L.f = f;
       if (key !== KEY_W && grp.hasOver) {
         L.explicit = true;
         L.r = grp.over[0];
@@ -519,7 +522,8 @@ export class ChromaLighting {
     // lit lights keep the gradient's last colour
     for (const L of grp.lights) {
       if (L.key === KEY_W || L.mode === MODE_OFF) continue;
-      if (!L.explicit) L.k *= end[3];
+      // the gradient's alpha is the light's brightness (fading to alpha 0 turns it off)
+      L.k = L.f * end[3];
       L.explicit = true;
       L.r = end[0];
       L.g = end[1];
@@ -605,7 +609,7 @@ export class ChromaLighting {
         r = grp.gradCol[0];
         g = grp.gradCol[1];
         b = grp.gradCol[2];
-        if (!L.explicit) kk *= grp.gradCol[3];
+        kk = L.f * grp.gradCol[3];
         busy = true;
       } else if (L.explicit) {
         r = L.r;
@@ -808,7 +812,7 @@ export class ChromaLighting {
       const grp = this.groups[type];
       groups.push([grp.over.slice(), grp.hasOver, grp.grad]);
       for (const L of grp.lights) {
-        lights.push([L.mode, L.t0, L.k, L.key, L.explicit, L.r, L.g, L.b, L.ease, L.trT0, L.trT1, L.from.slice(), L.to.slice(), L.trEase, L.hsv]);
+        lights.push([L.mode, L.t0, L.k, L.key, L.explicit, L.r, L.g, L.b, L.ease, L.trT0, L.trT1, L.from.slice(), L.to.slice(), L.trEase, L.hsv, L.f]);
       }
     }
     return {
@@ -843,6 +847,7 @@ export class ChromaLighting {
         }
         L.trEase = s[13];
         L.hsv = s[14];
+        L.f = s[15];
       }
     });
     this.boost = cp.boost;
