@@ -122,6 +122,37 @@ export class UIPanel {
     return false;
   }
 
+  /** The draggable widget (onDrag) at a point, or null. */
+  dragAt(uv) {
+    const h = this.hitAt(uv);
+    return h && h.onDrag && !h.disabled ? h : null;
+  }
+
+  /**
+   * Drags widget `id` to a point (uv on the panel, may lie outside the widget): calls its
+   * onDrag(u, v) with the point inside the widget's rectangle (0..1, clamped), and on the
+   * last call (end) its onDragEnd(u, v). Hit rectangles are looked up by id each time, as
+   * the panel redraws while dragging.
+   */
+  drag(id, uv, end = false) {
+    let h = null;
+    for (let i = this.hits.length - 1; i >= 0; i--) {
+      if (this.hits[i].id === id) {
+        h = this.hits[i];
+        break;
+      }
+    }
+    if (!h || !h.onDrag || h.disabled) return false;
+    const x = uv.x * this.width;
+    const y = (1 - uv.y) * this.height;
+    const u = Math.max(0, Math.min(1, (x - h.x) / h.w));
+    const v = Math.max(0, Math.min(1, (y - h.y) / h.h));
+    h.onDrag(u, v);
+    if (end) h.onDragEnd?.(u, v);
+    this.invalidate();
+    return true;
+  }
+
   scroll(uv, dir) {
     const x = uv.x * this.width;
     const y = (1 - uv.y) * this.height;
@@ -204,6 +235,32 @@ export class UIPanel {
       ctx.fillRect(x, y, w, h);
     }
     ctx.restore();
+  }
+
+  /**
+   * A horizontal slider (track, filled part and knob) at frac 0..1. Pressing anywhere on it
+   * jumps there, holding and moving drags it: onDrag(u) with u 0..1 along the track; the touch
+   * area reaches `pad` pixels above and below the track.
+   */
+  slider(id, x, y, w, h, frac, { onDrag, onDragEnd, disabled = false, color = THEME.accent, pad = 26 } = {}) {
+    const { ctx } = this;
+    const f = Math.max(0, Math.min(1, frac || 0));
+    const hover = !disabled && this.isHovered(id);
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    roundRect(ctx, x, y, w, h, h / 2);
+    ctx.fill();
+    ctx.fillStyle = color;
+    roundRect(ctx, x, y, Math.max(h, w * f), h, h / 2);
+    ctx.fill();
+    const r = h * 0.9 + (hover ? 4 : 0);
+    ctx.beginPath();
+    ctx.arc(x + w * f, y + h / 2, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = color;
+    ctx.stroke();
+    this.area(id, x, y - pad, w, h + pad * 2, { disabled, onDrag, onDragEnd });
   }
 
   bar(x, y, w, h, frac, color = THEME.accent) {

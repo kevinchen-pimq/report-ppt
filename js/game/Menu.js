@@ -7,6 +7,7 @@ import { downloads } from '../downloads.js';
 import { DIFF_NAMES } from '../mapLoader.js';
 import { SABER_STYLES, NOTE_STYLES, WALL_STYLES, buildSaberVisual } from './Models.js';
 import { ENV_MODULES, envLabel, preloadEnvModule, environmentText, resolveEnvironment } from './Environment.js';
+import { fmtTime, fmtRate, RATE_MIN, RATE_MAX } from './Practice.js';
 
 const DIFF_COLORS = { Easy: '#4cdf8f', Normal: '#59b0f4', Hard: '#ff9d3a', Expert: '#ff4d5e', ExpertPlus: '#c46cff' };
 const SORTS = [
@@ -852,6 +853,13 @@ export class Menu {
       onClick: () => this.game.playEntry(e, s.setIdx, s.diffIdx),
     });
     p.button('song-back', CX + 490, 610, 260, 110, '返回歌曲庫', { size: 28, onClick: () => this.open('library') });
+    const pr = this.game.practice;
+    p.button('song-practice', CX + 780, 610, 205, 110, '練習模式', {
+      size: 30,
+      active: pr.enabled,
+      sub: pr.enabled ? '開：可選位置與速度' : '關',
+      onClick: () => pr.setEnabled(!pr.enabled),
+    });
   }
 
   colorSwatches(p, colors, x, y) {
@@ -1074,6 +1082,10 @@ export class Menu {
 
   renderReady(p) {
     const g = this.game;
+    if (g.practice.active) {
+      this.renderPracticeReady(p);
+      return;
+    }
     this.songCard(p);
     const hint = g.mode === 'vr' ? 'B / Y：暫停 · 用雷射指向按鈕並扣扳機' : '空白鍵：開始 / 暫停 · Esc：離開 · 滑鼠：揮劍（按住左鍵換紅劍）';
     p.text(hint, p.width / 2, 400, { size: 28, color: THEME.muted, align: 'center' });
@@ -1089,6 +1101,10 @@ export class Menu {
 
   renderPause(p) {
     const g = this.game;
+    if (g.practice.active) {
+      this.renderPracticePause(p);
+      return;
+    }
     p.text('暫停', p.width / 2, 130, { size: 96, weight: 900, align: 'center' });
     p.text(`${g.meta?.title || ''} · ${g.meta?.difficultyName || ''}`, p.width / 2, 190, { size: 30, color: THEME.muted, align: 'center', maxWidth: p.width - 100 });
     const bw = 340;
@@ -1109,14 +1125,92 @@ export class Menu {
     const g = this.game;
     const r = g.lastResults;
     if (!r) return;
-    p.text(r.failed ? 'LEVEL FAILED' : 'LEVEL CLEARED', p.width / 2, 110, { size: 80, weight: 900, align: 'center', color: r.failed ? THEME.red : THEME.green });
+    if (r.practice) p.text(`練習結束 · 速度 ${fmtRate(r.rate)}`, p.width / 2, 110, { size: 72, weight: 900, align: 'center', color: '#ffd36b' });
+    else p.text(r.failed ? 'LEVEL FAILED' : 'LEVEL CLEARED', p.width / 2, 110, { size: 80, weight: 900, align: 'center', color: r.failed ? THEME.red : THEME.green });
     p.text(`${r.title} · ${r.characteristic} ${r.difficulty}`, p.width / 2, 165, { size: 32, color: THEME.muted, align: 'center', maxWidth: p.width - 100 });
     p.text(`${r.rank}`, p.width / 2 - 40, 310, { size: 140, weight: 900, align: 'right' });
     p.text(`${r.percent.toFixed(2)}%`, p.width / 2 + 10, 300, { size: 80, weight: 800 });
+    if (r.practice) p.text('練習模式不記錄最佳成績', p.width / 2 + 10, 345, { size: 28, color: THEME.muted });
     if (r.best) p.text(r.best.isNew ? '新紀錄！' : `最佳 ${r.best.score.toLocaleString('en-US')} (${r.best.percent.toFixed(2)}%)`, p.width / 2 + 10, 345, { size: 28, color: r.best.isNew ? THEME.green : THEME.muted });
     p.text(`分數 ${r.score.toLocaleString('en-US')}    最大連擊 ${r.maxCombo}`, p.width / 2, 420, { size: 38, align: 'center' });
     p.text(`命中 ${r.hits}    Miss ${r.misses}    壞切 ${r.badCuts}    炸彈 ${r.bombHits}`, p.width / 2, 470, { size: 32, color: THEME.muted, align: 'center' });
     p.button('res-again', p.width / 2 - 360, 540, 340, 120, '再玩一次', { size: 42, active: true, onClick: () => g.restart() });
     p.button('res-menu', p.width / 2 + 20, 540, 340, 120, '回到選單', { size: 42, onClick: () => g.exitToMenu() });
+  }
+  // ----- practice mode (ready screen / pause menu) -------------------------------
+  /** A practice box: tag, title, time and a draggable timeline at frac (0..1). */
+  practiceTimeline(p, id, y, label, time, total, { onDrag, onDragEnd, note } = {}) {
+    const { ctx } = p;
+    ctx.fillStyle = 'rgba(255,211,107,0.08)';
+    roundRect(ctx, 70, y, p.width - 140, 260, 22);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,211,107,0.45)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const tagW = p.text('練習模式', 0, -100, { size: 26, weight: 800 }) + 28;
+    ctx.fillStyle = 'rgba(255,211,107,0.9)';
+    roundRect(ctx, 100, y + 22, tagW, 40, 20);
+    ctx.fill();
+    p.text('練習模式', 100 + tagW / 2, y + 43, { size: 26, weight: 800, color: '#1a1420', align: 'center', baseline: 'middle' });
+    p.text(label, 120 + tagW, y + 54, { size: 30, weight: 700 });
+    if (note) p.text(note, 120 + tagW + p.ctx.measureText(label).width + 24, y + 54, { size: 24, color: THEME.accent });
+    p.text(`${fmtTime(time)} / ${fmtTime(total)}`, p.width - 100, y + 54, { size: 34, weight: 800, align: 'right' });
+    p.slider(id, 110, y + 92, p.width - 220, 18, total > 0 ? time / total : 0, { onDrag, onDragEnd, color: '#ffd36b' });
+    this.practiceSpeed(p, y + 160);
+  }
+
+  /** Speed − / + / back to 100 %, and the pitch hint. */
+  practiceSpeed(p, y) {
+    const pr = this.game.practice;
+    p.text('速度', 110, y + 42, { size: 30, weight: 700 });
+    p.button('pr-slower', 200, y, 80, 64, '−', { size: 38, disabled: pr.rate <= RATE_MIN, onClick: () => pr.stepRate(-1) });
+    p.text(fmtRate(pr.rate), 345, y + 44, { size: 34, weight: 800, align: 'center', color: pr.rate === 1 ? THEME.text : '#ffd36b' });
+    p.button('pr-faster', 410, y, 80, 64, '+', { size: 38, disabled: pr.rate >= RATE_MAX, onClick: () => pr.stepRate(1) });
+    p.button('pr-rate-reset', 510, y, 190, 64, '恢復 100%', { size: 26, disabled: pr.rate === 1, onClick: () => pr.setRate(1) });
+    p.text('變速時音調會跟著改變', 725, y + 42, { size: 26, color: THEME.muted });
+  }
+
+  renderPracticeReady(p) {
+    const g = this.game;
+    const pr = g.practice;
+    this.songCard(p, 30);
+    const key = pr.songKey();
+    const max = pr.maxStart;
+    const start = Math.min(pr.run.start, max);
+    this.practiceTimeline(p, 'pr-start', 290, '開始位置', start, max, {
+      note: start > 0 ? '' : '（從頭開始）',
+      onDrag: (u) => pr.setStart(key, u * max, false),
+      onDragEnd: (u) => pr.setStart(key, u * max, true),
+    });
+    const hint = g.mode === 'vr' ? '在時間軸上扣住扳機拖動選開始位置 · 練習不會失敗、不記錄成績' : '在時間軸上按住滑鼠拖動選開始位置 · 練習不會失敗、不記錄成績';
+    p.text(hint, p.width / 2, 590, { size: 26, color: THEME.muted, align: 'center' });
+    p.button('ready-start', p.width / 2 - 330, 615, 420, 110, '▶ 開始', { size: 50, active: true, onClick: () => g.beginPlay() });
+    p.button('ready-back', p.width / 2 + 110, 615, 220, 110, '返回', { size: 34, onClick: () => g.exitToMenu() });
+    if (g.mode === 'vr') {
+      p.button('ready-settings', p.width - 270, 640, 200, 60, '修改設定', { size: 24, onClick: () => g.showMenu('settings') });
+    }
+  }
+
+  renderPracticePause(p) {
+    const g = this.game;
+    const pr = g.practice;
+    p.text('暫停', p.width / 2, 100, { size: 80, weight: 900, align: 'center' });
+    p.text(`${g.meta?.title || ''} · ${g.meta?.difficultyName || ''}`, p.width / 2, 148, { size: 28, color: THEME.muted, align: 'center', maxWidth: p.width - 100 });
+    const bw = 340;
+    const x0 = (p.width - bw * 3 - 40) / 2;
+    p.button('pause-resume', x0, 175, bw, 110, '▶ 從這裡繼續', { size: 40, active: true, onClick: () => g.resume() });
+    p.button('pause-restart', x0 + bw + 20, 175, bw, 110, '從開始位置重來', { size: 34, onClick: () => g.restart() });
+    p.button('pause-menu', x0 + 2 * (bw + 20), 175, bw, 110, '回到選單', { size: 40, onClick: () => g.exitToMenu() });
+    const total = pr.duration;
+    this.practiceTimeline(p, 'pr-seek', 310, '位置', pr.position, total, {
+      note: pr.pending !== null ? '按「從這裡繼續」從這裡開始' : '',
+      onDrag: (u) => pr.scrub(u * total),
+      onDragEnd: (u) => pr.scrub(u * total, true),
+    });
+    const sx = (p.width - 1000) / 2;
+    this.stepperRow(p, 'pause-lat', sx, 585, '音訊延遲', 'audioLatencyMs', (v) => `${v > 0 ? '+' : ''}${v} ms`, 480);
+    this.stepperRow(p, 'pause-vol', sx + 520, 585, '音樂音量', 'volume', (v) => `${Math.round(v * 100)}%`, 480);
+    const hint = g.mode === 'vr' ? '扣住扳機拖動時間軸（或點一下跳過去）· A / X：重來 · B / Y：回到選單' : '拖動時間軸選位置 · ← / →：前後 5 秒 · [ / ]：速度 · 空白鍵：繼續';
+    p.text(hint, p.width / 2, 720, { size: 26, color: THEME.muted, align: 'center' });
   }
 }

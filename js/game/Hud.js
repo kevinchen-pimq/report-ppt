@@ -73,6 +73,13 @@ export class Hud {
     this.lastBottom = [NaN, NaN, NaN, NaN];
   }
 
+  /** A small tag in the middle of the bottom panel (practice mode: 「練習」), null = none. */
+  setTag(text) {
+    if ((text || null) === (this.tag || null)) return;
+    this.tag = text || null;
+    this.lastBottom[0] = NaN; // redraw
+  }
+
   setVisible(v) {
     this.root.visible = v;
   }
@@ -160,6 +167,12 @@ export class Hud {
       ctx.fillText(fmt(Math.max(0, t)), x, 92);
       ctx.textAlign = 'right';
       ctx.fillText(fmt(duration), x + bw, 92);
+      if (this.tag) {
+        ctx.font = `700 22px ${FONT}`;
+        ctx.fillStyle = '#ffd36b';
+        ctx.textAlign = 'center';
+        ctx.fillText(this.tag, w / 2, 92);
+      }
     });
   }
 
