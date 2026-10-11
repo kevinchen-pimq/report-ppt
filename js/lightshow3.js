@@ -100,61 +100,97 @@ export function easeIndex(type) {
 
 export const ease = (idx, t) => GL_EASINGS[idx](t < 0 ? 0 : t > 1 ? 1 : t);
 
-function bounceOutInline(t) {
-  if (t < 1 / 2.75) return 7.5625 * t * t;
-  if (t < 2 / 2.75) return 7.5625 * (t -= 1.5 / 2.75) * t + 0.75;
-  if (t < 2.5 / 2.75) return 7.5625 * (t -= 2.25 / 2.75) * t + 0.9375;
-  return 7.5625 * (t -= 2.625 / 2.75) * t + 0.984375;
-}
+
 
 /**
- * Same curves as GL_EASINGS, for the per-frame runtime: reads t from io[0] and writes the result
- * there (a typed array instead of number arguments / results, so a frame allocates nothing).
+ * Same curves as GL_EASINGS, for the per-frame runtime: reads t from io[at] and writes the result
+ * there (a typed array instead of number arguments / results).
  */
-export function easeIO(idx, io) {
-  let t = io[0];
-  t = t < 0 ? 0 : t > 1 ? 1 : t;
-  let v;
+export function easeIO(idx, io, at = 0) {
+  // every result is written straight into io[at] (no phi of numbers: a phi mixing small integer
+  // constants and doubles may be boxed by the JIT)
+  if (!(io[at] > 0)) io[at] = 0;
+  else if (io[at] > 1) io[at] = 1;
+  const t = io[at];
+  if (idx === 0) return;
+  const lo = t < 0.5;
   switch (idx) {
-    case 0: v = t; break;
-    case 1: v = t * t; break;
-    case 2: v = 1 - (1 - t) * (1 - t); break;
-    case 3: v = t < 0.5 ? 2 * t * t : 1 - ((-2 * t + 2) * (-2 * t + 2)) / 2; break;
-    case 4: v = 1 - Math.cos((t * Math.PI) / 2); break;
-    case 5: v = Math.sin((t * Math.PI) / 2); break;
-    case 6: v = -(Math.cos(Math.PI * t) - 1) / 2; break;
-    case 7: v = t * t * t; break;
-    case 8: v = 1 - (1 - t) * (1 - t) * (1 - t); break;
-    case 9: v = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; break;
-    case 10: v = t * t * t * t; break;
-    case 11: v = 1 - Math.pow(1 - t, 4); break;
-    case 12: v = t < 0.5 ? 8 * t * t * t * t : 1 - Math.pow(-2 * t + 2, 4) / 2; break;
-    case 13: v = t * t * t * t * t; break;
-    case 14: v = 1 - Math.pow(1 - t, 5); break;
-    case 15: v = t < 0.5 ? 16 * Math.pow(t, 5) : 1 - Math.pow(-2 * t + 2, 5) / 2; break;
-    case 16: v = t === 0 ? 0 : Math.pow(2, 10 * t - 10); break;
-    case 17: v = t === 1 ? 1 : 1 - Math.pow(2, -10 * t); break;
-    case 18: v = t === 0 ? 0 : t === 1 ? 1 : t < 0.5 ? Math.pow(2, 20 * t - 10) / 2 : (2 - Math.pow(2, -20 * t + 10)) / 2; break;
-    case 19: v = 1 - Math.sqrt(1 - t * t); break;
-    case 20: v = Math.sqrt(1 - (t - 1) * (t - 1)); break;
-    case 21: v = t < 0.5 ? (1 - Math.sqrt(1 - 4 * t * t)) / 2 : (Math.sqrt(1 - (-2 * t + 2) * (-2 * t + 2)) + 1) / 2; break;
-    case 22: v = C3 * t * t * t - C1 * t * t; break;
-    case 23: v = 1 + C3 * Math.pow(t - 1, 3) + C1 * (t - 1) * (t - 1); break;
+    case 1: io[at] = t * t; return;
+    case 2: io[at] = 1 - (1 - t) * (1 - t); return;
+    case 3:
+      if (lo) io[at] = 2 * t * t;
+      else io[at] = 1 - ((2 - 2 * t) * (2 - 2 * t)) / 2;
+      return;
+    case 4: io[at] = 1 - Math.cos((t * Math.PI) / 2); return;
+    case 5: io[at] = Math.sin((t * Math.PI) / 2); return;
+    case 6: io[at] = (1 - Math.cos(Math.PI * t)) / 2; return;
+    case 7: io[at] = t * t * t; return;
+    case 8: io[at] = 1 - (1 - t) * (1 - t) * (1 - t); return;
+    case 9:
+      if (lo) io[at] = 4 * t * t * t;
+      else io[at] = 1 - Math.pow(2 - 2 * t, 3) / 2;
+      return;
+    case 10: io[at] = t * t * t * t; return;
+    case 11: io[at] = 1 - Math.pow(1 - t, 4); return;
+    case 12:
+      if (lo) io[at] = 8 * t * t * t * t;
+      else io[at] = 1 - Math.pow(2 - 2 * t, 4) / 2;
+      return;
+    case 13: io[at] = t * t * t * t * t; return;
+    case 14: io[at] = 1 - Math.pow(1 - t, 5); return;
+    case 15:
+      if (lo) io[at] = 16 * Math.pow(t, 5);
+      else io[at] = 1 - Math.pow(2 - 2 * t, 5) / 2;
+      return;
+    case 16: if (t > 0) io[at] = Math.pow(2, 10 * t - 10); return;
+    case 17: if (t < 1) io[at] = 1 - Math.pow(2, -10 * t); return;
+    case 18:
+      if (t > 0 && t < 1) {
+        if (lo) io[at] = Math.pow(2, 20 * t - 10) / 2;
+        else io[at] = (2 - Math.pow(2, 10 - 20 * t)) / 2;
+      }
+      return;
+    case 19: io[at] = 1 - Math.sqrt(1 - t * t); return;
+    case 20: io[at] = Math.sqrt(1 - (t - 1) * (t - 1)); return;
+    case 21:
+      if (lo) io[at] = (1 - Math.sqrt(1 - 4 * t * t)) / 2;
+      else io[at] = (Math.sqrt(1 - (2 - 2 * t) * (2 - 2 * t)) + 1) / 2;
+      return;
+    case 22: io[at] = C3 * t * t * t - C1 * t * t; return;
+    case 23: io[at] = 1 + C3 * Math.pow(t - 1, 3) + C1 * (t - 1) * (t - 1); return;
     case 24: case 31:
-      v = t < 0.5 ? (4 * t * t * ((C2 + 1) * 2 * t - C2)) / 2 : ((2 * t - 2) * (2 * t - 2) * ((C2 + 1) * (t * 2 - 2) + C2) + 2) / 2; break;
-    case 25: v = t === 0 ? 0 : t === 1 ? 1 : -Math.pow(2, 10 * t - 10) * Math.sin((t * 10 - 10.75) * C4); break;
-    case 26: v = t === 0 ? 0 : t === 1 ? 1 : Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * C4) + 1; break;
+      if (lo) io[at] = (4 * t * t * ((C2 + 1) * 2 * t - C2)) / 2;
+      else io[at] = ((2 * t - 2) * (2 * t - 2) * ((C2 + 1) * (t * 2 - 2) + C2) + 2) / 2;
+      return;
+    case 25: if (t > 0 && t < 1) io[at] = -Math.pow(2, 10 * t - 10) * Math.sin((t * 10 - 10.75) * C4); return;
+    case 26: if (t > 0 && t < 1) io[at] = Math.pow(2, -10 * t) * Math.sin((t * 10 - 0.75) * C4) + 1; return;
     case 27: case 32:
-      v = t === 0 ? 0 : t === 1 ? 1 : t < 0.5
-        ? -(Math.pow(2, 20 * t - 10) * Math.sin((20 * t - 11.125) * C5)) / 2
-        : (Math.pow(2, -20 * t + 10) * Math.sin((20 * t - 11.125) * C5)) / 2 + 1;
-      break;
-    case 28: v = 1 - bounceOutInline(1 - t); break;
-    case 29: v = bounceOutInline(t); break;
-    case 30: case 33: v = t < 0.5 ? (1 - bounceOutInline(1 - 2 * t)) / 2 : (1 + bounceOutInline(2 * t - 1)) / 2; break;
-    default: v = t;
+      if (t > 0 && t < 1) {
+        if (lo) io[at] = -(Math.pow(2, 20 * t - 10) * Math.sin((20 * t - 11.125) * C5)) / 2;
+        else io[at] = (Math.pow(2, 10 - 20 * t) * Math.sin((20 * t - 11.125) * C5)) / 2 + 1;
+      }
+      return;
+    case 28: bounceIO(io, at, 1 - t); io[at] = 1 - io[at]; return;
+    case 29: bounceIO(io, at, t); return;
+    case 30: case 33:
+      if (lo) {
+        bounceIO(io, at, 1 - 2 * t);
+        io[at] = (1 - io[at]) / 2;
+      } else {
+        bounceIO(io, at, 2 * t - 1);
+        io[at] = (1 + io[at]) / 2;
+      }
+      return;
+    default:
   }
-  io[0] = v;
+}
+
+/** Bounce-out of x written to io[at] (see easeIO). */
+function bounceIO(io, at, x) {
+  if (x < 1 / 2.75) io[at] = 7.5625 * x * x;
+  else if (x < 2 / 2.75) io[at] = 7.5625 * (x - 1.5 / 2.75) * (x - 1.5 / 2.75) + 0.75;
+  else if (x < 2.5 / 2.75) io[at] = 7.5625 * (x - 2.25 / 2.75) * (x - 2.25 / 2.75) + 0.9375;
+  else io[at] = 7.5625 * (x - 2.625 / 2.75) * (x - 2.625 / 2.75) + 0.984375;
 }
 
 // ---------------------------------------------------------------------------

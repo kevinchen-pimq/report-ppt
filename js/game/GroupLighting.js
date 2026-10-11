@@ -16,16 +16,19 @@
 // modules build in their own frame (see CONTRACT.md). fx: set(element, value).
 // seek(t) jumps to any song time (practice mode); update(t) also follows a backwards jump.
 
-import { buildKeyframes, easeIO, TR_INTERP } from '../lightshow3.js';
+import { buildKeyframes, easeIO, GL_EASINGS, TR_INTERP } from '../lightshow3.js';
 
 const DEG = Math.PI / 180;
 const AXES = ['x', 'y', 'z'];
 const KEY_RGB = 3;
 const MAX_BRIGHT = 1.5;
-// Per-frame scratch: numbers travel through typed arrays rather than as call arguments / results
-// (a double crossing a call that is not inlined is boxed, i.e. allocated)
+// Per-frame scratch. Numbers travel through typed arrays rather than as call arguments, results
+// or locals that stay alive across a call: the optimizing tiers box (allocate) a double in those
+// places, e.g. Maglev, which runs this code in Chrome. So the hot code below keeps intermediate
+// values in typed-array slots and reads the song time from NOW where it needs it.
 const NOW = new Float64Array(1); // song time of the current update
-const EZ = new Float64Array(1); // easing in / out
+const W = new Float64Array(10); // colour work slots: 0-2 colour A, 3-5 colour B, 6 brightness, 7 progress, 8 strobe phase, 9 low
+const V = new Float64Array(2); // value work slots: 0 value, 1 progress
 const ROT = 0;
 const POS = 1;
 const FX = 2;
@@ -97,18 +100,17 @@ class Track {
 
   /** Advances to NOW[0] and evaluates the elements that changed or are changing. */
   update() {
-    const t = NOW[0];
-    if (t < this.lt[0] - 1e-6) this.seek(t);
-    this.lt[0] = t;
+    if (NOW[0] < this.lt[0] - 1e-6) this.seek(NOW[0]);
+    this.lt[0] = NOW[0];
     const time = this.time;
     const start = this.start;
     const cur = this.cur;
     for (let i = 0; i < this.n; i++) {
       let k = cur[i];
       const end = start[i + 1];
-      if (k + 1 < end && time[k + 1] <= t) {
+      if (k + 1 < end && time[k + 1] <= NOW[0]) {
         do k++;
-        while (k + 1 < end && time[k + 1] <= t);
+        while (k + 1 < end && time[k + 1] <= NOW[0]);
         cur[i] = k;
         this.dirty[i] = 1;
       }
@@ -146,20 +148,21 @@ class ColorTrack extends Track {
     this.sf[k] = kf.sf ? 1 : 0;
   }
 
-  /** Colour of keyframe k into rt.tmp[o … o + 2]. */
+  /** Colour of keyframe k into W[o … o + 2] (palette colour, boost aware, or the Chroma colour). */
   color(k, o) {
-    const tmp = this.rt.tmp;
     const key = this.key[k];
     if (key === KEY_RGB) {
-      tmp[o] = this.cr[k];
-      tmp[o + 1] = this.cg[k];
-      tmp[o + 2] = this.cb[k];
+      W[o] = this.cr[k];
+      W[o + 1] = this.cg[k];
+      W[o + 2] = this.cb[k];
       return;
     }
-    const p = this.rt.palette(key);
-    tmp[o] = p.r;
-    tmp[o + 1] = p.g;
-    tmp[o + 2] = p.b;
+    const c = this.rt.colors;
+    const boost = this.rt.boost;
+    const p = key === 0 ? (boost ? c.leftBoost : c.left) : key === 1 ? (boost ? c.rightBoost : c.right) : boost ? c.whiteBoost || c.white : c.white;
+    W[o] = p.r;
+    W[o + 1] = p.g;
+    W[o + 2] = p.b;
   }
 
   eval(i, k, nx) {
@@ -169,44 +172,40 @@ class ColorTrack extends Track {
       L.set(0, 0, 0);
       return false;
     }
-    const tmp = this.rt.tmp;
-    this.color(k, 0);
-    let r = tmp[0];
-    let g = tmp[1];
-    let b = tmp[2];
-    let s = this.s[k];
     let busy = false;
-    let p = 0;
-    const dt = NOW[0] - this.time[k];
-    let dur = 0;
+    this.color(k, 0);
+    W[6] = this.s[k];
+    W[7] = 0;
     if (nx >= 0) {
-      dur = this.time[nx] - this.time[k];
-      if (dur > 0) {
-        EZ[0] = dt / dur;
-        easeIO(this.ease[nx], EZ);
-        p = EZ[0];
-      } else p = 1;
       this.color(nx, 3);
-      r += (tmp[3] - r) * p;
-      g += (tmp[4] - g) * p;
-      b += (tmp[5] - b) * p;
-      s += (this.s[nx] - s) * p;
+      const dur = this.time[nx] - this.time[k];
+      if (dur > 0) {
+        W[7] = (NOW[0] - this.time[k]) / dur;
+        easeIO(this.ease[nx], W, 7);
+      } else W[7] = 1;
+      W[0] += (W[3] - W[0]) * W[7];
+      W[1] += (W[4] - W[1]) * W[7];
+      W[2] += (W[5] - W[2]) * W[7];
+      W[6] += (this.s[nx] - W[6]) * W[7];
       busy = true;
     }
-    const f0 = this.sfreq[k];
-    const f1 = nx >= 0 ? this.sfreq[nx] : f0;
-    if (f0 > 0 || f1 > 0) {
+    if (this.sfreq[k] > 0 || (nx >= 0 && this.sfreq[nx] > 0)) {
       // strobe: cycles since the keyframe (frequency eased linearly toward the next one)
-      const cycles = dt * f0 + (nx >= 0 && dur > 0 ? ((f1 - f0) * dt * dt) / (2 * dur) : 0);
-      const ph = cycles - Math.floor(cycles);
-      let low = this.sb[k];
-      if (nx >= 0) low += (this.sb[nx] - low) * p;
-      s = this.sf[k] ? s + (low - s) * ph : ph < 0.5 ? s : low;
+      const dt = NOW[0] - this.time[k];
+      W[8] = dt * this.sfreq[k];
+      W[9] = this.sb[k];
+      if (nx >= 0) {
+        const dur = this.time[nx] - this.time[k];
+        if (dur > 0) W[8] += ((this.sfreq[nx] - this.sfreq[k]) * dt * dt) / (2 * dur);
+        W[9] += (this.sb[nx] - W[9]) * W[7];
+      }
+      W[8] -= Math.floor(W[8]);
+      if (this.sf[k]) W[6] += (W[9] - W[6]) * W[8];
+      else if (W[8] >= 0.5) W[6] = W[9];
       busy = true;
     }
-    if (s < 0) s = 0;
-    else if (s > MAX_BRIGHT) s = MAX_BRIGHT;
-    L.set(r * s, g * s, b * s);
+    W[6] = Math.min(MAX_BRIGHT, Math.max(0, W[6]));
+    L.set(W[0] * W[6], W[1] * W[6], W[2] * W[6]);
     return busy;
   }
 }
@@ -240,38 +239,35 @@ class ValueTrack extends Track {
   }
 
   eval(i, k, nx) {
-    let v = 0;
     let busy = false;
     if (k >= 0) {
-      v = this.val[k];
+      V[0] = this.val[k];
       if (nx >= 0) {
         const dur = this.time[nx] - this.time[k];
-        let p = 1;
+        V[1] = 1;
         if (dur > 0) {
-          EZ[0] = (NOW[0] - this.time[k]) / dur;
-          easeIO(this.ease[nx], EZ);
-          p = EZ[0];
+          V[1] = (NOW[0] - this.time[k]) / dur;
+          easeIO(this.ease[nx], V, 1);
         }
-        v += (this.val[nx] - v) * p;
+        V[0] += (this.val[nx] - V[0]) * V[1];
         busy = true;
       }
     } else {
-      v = this.before[i];
-      if (v !== v) return false; // NaN: an fx element without events is never set
+      V[0] = this.before[i];
+      if (V[0] !== V[0]) return false; // NaN: an fx element without events is never set
     }
-    if (v === this.last[i]) return busy;
-    this.last[i] = v;
+    if (V[0] === this.last[i]) return busy;
+    this.last[i] = V[0];
     if (this.mode === FX) {
-      this.fx.set(i, v);
+      this.fx.set(i, V[0]);
       return busy;
     }
     const o = this.objs[i];
     if (!o) return busy;
-    const x = this.rest[i] + v * this.k;
     const tgt = this.mode === ROT ? o.rotation : o.position;
-    if (this.axis === 0) tgt.x = x;
-    else if (this.axis === 1) tgt.y = x;
-    else tgt.z = x;
+    if (this.axis === 0) tgt.x = this.rest[i] + V[0] * this.k;
+    else if (this.axis === 1) tgt.y = this.rest[i] + V[0] * this.k;
+    else tgt.z = this.rest[i] + V[0] * this.k;
     return busy;
   }
 }
@@ -286,7 +282,6 @@ export class GroupLighting {
     this.lightGroups = target.lightGroups || {};
     this.fxGroups = target.fx || {};
     this.boost = false;
-    this.tmp = new Float32Array(6);
     this.tracks = [];
     this.colorTracks = [];
     this.source = null;
@@ -395,10 +390,35 @@ export class GroupLighting {
       for (let i = 0; i < t.n; i++) t.before[i] = t.start[i] === t.start[i + 1] ? NaN : Number.isFinite(def.initial) ? def.initial : t.val[t.start[i]];
       this.tracks.push(t);
     }
+    let end = 0;
     for (const t of this.tracks) {
       this.stats.tracks++;
       this.stats.keyframes += t.time.length;
       this.stats.elements += t.n;
+      if (t.time.length) end = Math.max(end, t.time[t.time.length - 1]);
+    }
+    this.warmUp(end);
+  }
+
+  /**
+   * Runs every code path once at load (all easings, then the tracks at a few song times), so the
+   * JIT has type feedback for all branches and doesn't deoptimise (and box numbers) in the song.
+   * The state it leaves is overwritten: reset() rewinds every track afterwards.
+   */
+  warmUp(end) {
+    for (let e = 0; e < GL_EASINGS.length; e++) {
+      for (let q = 0; q <= 8; q++) {
+        W[7] = q / 8;
+        easeIO(e, W, 7);
+      }
+    }
+    if (!(end > 0)) return;
+    for (let q = 0; q < 24; q++) {
+      NOW[0] = (end * q) / 23;
+      for (let i = 0; i < this.tracks.length; i++) {
+        this.tracks[i].seek(NOW[0]);
+        this.tracks[i].update();
+      }
     }
   }
 
