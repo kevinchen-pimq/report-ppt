@@ -1,6 +1,6 @@
 // Parses Beat Saber difficulty files (v2, v3, v4) into a normalized,
 // seconds-based representation used by the game.
-import { parseLightshow3, hasLightshow3, countLightshow3Chroma } from './lightshow3.js';
+import { parseLightshow3, hasLightshow3, countLightshow3Chroma, easeIndex, GL_EASINGS } from './lightshow3.js';
 
 const DEFAULT_NJS = { Easy: 10, Normal: 10, Hard: 10, Expert: 12, ExpertPlus: 16 };
 
@@ -388,6 +388,8 @@ function buildArc(a, toTime) {
 // ---------------------------------------------------------------------------
 // NJS events (v4): NJS = base + delta, eased from the previous event
 
+// Standard curves, used by the Chroma easing names below (NJS events use lightshow3's
+// EaseType-ordered table instead).
 const EASINGS = [
   (t) => t, // 0 linear
   (t) => 1 - Math.cos((t * Math.PI) / 2), // InSine
@@ -413,10 +415,10 @@ const EASINGS = [
   (t) => (t < 0.5 ? (1 - Math.sqrt(1 - (2 * t) ** 2)) / 2 : (Math.sqrt(1 - (-2 * t + 2) ** 2) + 1) / 2), // InOutCirc
 ];
 
+/** NJS event easing by Beat Saber's EaseType index (-1 none, 0 linear, 1 InQuad, 4 InSine … 30, 100–102). */
 export function ease(type, t) {
   if (type === -1) return t >= 1 ? 1 : 0; // "none": jump at the event
-  const f = EASINGS[type] || EASINGS[0];
-  return f(Math.max(0, Math.min(1, t)));
+  return GL_EASINGS[easeIndex(type)](Math.max(0, Math.min(1, t)));
 }
 
 /** Returns njsAt(seconds) for a map; constant when there are no NJS events. */

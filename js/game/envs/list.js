@@ -1,5 +1,5 @@
-// Official environments, by Info.dat name. `v3`: the environment is driven by v3 group lighting
-// (lightColorEventBoxGroups …) instead of basic events. Modules live in ./<name>.js.
+// Official environments, by Info.dat name; every one has a module in ./<name>.js. `v3`: the
+// environment is driven by v3 group lighting (lightColorEventBoxGroups …) instead of basic events.
 export const ENVIRONMENTS = [
   ['DefaultEnvironment', 'The First'],
   ['OriginsEnvironment', 'Origins'],
@@ -41,6 +41,6 @@ export const ENVIRONMENTS = [
   ['HipHopEnvironment', 'Hip Hop', 'v3'],
   ['ColliderEnvironment', 'Collider', 'v3'],
   ['BritneyEnvironment', 'Britney Spears', 'v3'],
-  ['Monstercat2Environment', 'Monstercat 2', 'v3'],
+  ['Monstercat2Environment', 'Monstercat 2.0', 'v3'],
   ['MetallicaEnvironment', 'Metallica', 'v3'],
 ];

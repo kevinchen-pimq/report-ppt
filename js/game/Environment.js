@@ -21,35 +21,9 @@ const _m = new THREE.Matrix4();
 // ---------------------------------------------------------------------------
 // Environment modules (js/game/envs/<Name>.js, see envs/CONTRACT.md)
 
-// v3 (group lighting) environments are enabled when their module file exists: checked once at
-// start-up (HEAD requests, in parallel, given up after a short time), so a module dropped into
-// envs/ is picked up without editing list.js. The import itself can still fail later: prepare()
-// then falls back to our own scenery.
-async function findV3Modules() {
-  const names = ENVIRONMENTS.filter(([, , v3]) => v3).map(([n]) => n);
-  if (!names.length || typeof fetch !== 'function' || typeof location === 'undefined') return [];
-  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
-  const timer = setTimeout(() => ctl?.abort(), 2500);
-  try {
-    const found = await Promise.all(names.map(async (name) => {
-      try {
-        const r = await fetch(new URL(`./envs/${name}.js`, import.meta.url), { method: 'HEAD', signal: ctl?.signal });
-        const type = r.headers.get('content-type') || '';
-        // a static host may answer a missing file with its index page: only a script counts
-        return r.ok && (!type || /javascript|ecmascript/i.test(type)) ? name : null;
-      } catch (e) {
-        return null;
-      }
-    }));
-    return found.filter(Boolean);
-  } finally {
-    clearTimeout(timer);
-  }
-}
-const V3_FOUND = new Set(await findV3Modules().catch(() => []));
-
-/** Official environments that have a module (Info.dat name -> label). */
-export const ENV_MODULES = ENVIRONMENTS.filter(([name, , v3]) => !v3 || V3_FOUND.has(name)).map(([name, label]) => ({ name, label }));
+/** Official environments that have a module (Info.dat name -> label): every entry of envs/list.js.
+ *  If a module fails to import, prepare() falls back to our own scenery. */
+export const ENV_MODULES = ENVIRONMENTS.map(([name, label]) => ({ name, label }));
 const MODULE_NAMES = new Set(ENV_MODULES.map((m) => m.name));
 
 /** Whether an environment (Info.dat name) has a module. */
