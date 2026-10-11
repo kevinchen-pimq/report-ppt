@@ -7,6 +7,9 @@
 //
 // Seeking (seekTo): every subsystem is put into the state it has at the new song time:
 //   notes / bombs / chains / walls   NoteManager.seek (spawn pointers by binary search)
+//   modcharts (Noodle Extensions)    NoteManager.seek -> NoodleField.seek: the objects alive at t
+//                                    and NoodleRuntime.seek (tracks, path animations, track
+//                                    parents, player track are all functions of the song time)
 //   arcs                             ArcManager.seek
 //   lighting / environment           Environment.seek -> each lighting runtime's seek(t)
 //   score                            kept (never saved), the streak starts over

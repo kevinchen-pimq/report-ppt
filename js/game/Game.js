@@ -33,6 +33,8 @@ const IN_GAME = new Set(['ready', 'playing', 'paused', 'finished']);
 const _up = new THREE.Vector3(0, 1, 0);
 const _ray = new THREE.Raycaster();
 const _plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0.9);
+const _rigInv = new THREE.Matrix4();
+const _live = new THREE.Vector3();
 
 const hex = (c) => (typeof c === 'string' ? parseInt(c.replace('#', ''), 16) : c);
 const hexOrNull = (c) => (c == null ? null : hex(c));
@@ -62,7 +64,14 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.05, 300);
     this.camera.position.set(0, 1.7, 1.6);
     this.camera.lookAt(0, 1.15, -6);
-    this.scene.add(this.camera);
+    // The player's play space: the camera and the controllers hang under it. Identity except
+    // when a modchart moves the player (Noodle AssignPlayerToTrack); VR head tracking stays
+    // relative to it.
+    this.rig = new THREE.Group();
+    this.rig.name = 'player-rig';
+    this.rigMoved = false;
+    this.scene.add(this.rig);
+    this.rig.add(this.camera);
 
     this.env = new Environment(this.scene);
     this.effects = new Effects(this.scene);
@@ -319,7 +328,7 @@ export class Game {
       await this.library.load(entry);
       const buffer = await this.library.audioFor(entry, this.audio);
       this.audio.buffer = buffer;
-      const { map, meta } = this.library.loadDifficulty(entry, setIdx, diffIdx);
+      const { map, meta } = this.library.loadDifficulty(entry, setIdx, diffIdx, { noodle: this.settings.noodle !== false });
       this.current = { entry, setIdx, diffIdx };
       this.setMap(map, meta);
       // build the environment now (loading screen), never mid-song; null = our own scenery
@@ -428,6 +437,29 @@ export class Game {
     this.env.reset([]);
     this.runEnv = null; // menus show our own scenery and colours
     this.inWall = false;
+    this.resetRig();
+  }
+
+  /** Modchart player track: moves the play space (rig) to the track's transform. */
+  updateRig() {
+    const field = this.notes.field;
+    const rig = this.rig;
+    if (field && field.playerTransform(rig.position, rig.quaternion)) {
+      this.rigMoved = true;
+      rig.updateMatrixWorld(true);
+      _rigInv.copy(rig.matrixWorld).invert();
+      field.playerPos.setFromMatrixPosition(rig.matrixWorld);
+    } else if (this.rigMoved) this.resetRig();
+  }
+
+  resetRig() {
+    if (!this.rigMoved) return;
+    this.rigMoved = false;
+    this.rig.position.set(0, 0, 0);
+    this.rig.quaternion.identity();
+    this.rig.updateMatrixWorld(true);
+    _rigInv.identity();
+    if (this.notes.field) this.notes.field.playerPos.set(0, 0, 0);
   }
 
   /** In-VR menu (song library etc). */
@@ -477,13 +509,14 @@ export class Game {
     this.autoIdx = [0, 0];
     this.autoNotes = [0, 1].map((c) =>
       this.map.notes
-        .filter((n) => n.kind === 'note' && n.color === c)
+        .filter((n) => n.kind === 'note' && n.color === c && !n.fake)
         .map((n) => {
           const rot = noteRotation(n.dir, n.angle);
           const d = n.dir === 8 ? [0, -1] : rotationToDir(rot);
-          return { t: n.time - AUTO_CUT_Z / this.map.njs, x: laneX(n.x), y: layerY(n.y), dx: d[0], dy: d[1] };
+          return { t: n.time - AUTO_CUT_Z / (n.nd?.njsV || this.map.njs), x: laneX(n.x), y: layerY(n.y), dx: d[0], dy: d[1], note: n };
         }),
     );
+    this.resetRig();
     const firstObj = Math.min(
       this.map.notes.length ? this.map.notes[0].time : Infinity,
       this.map.walls.length ? this.map.walls[0].time : Infinity,
@@ -619,7 +652,7 @@ export class Game {
     for (let i = 0; i < 2; i++) {
       const ray = this.renderer.xr.getController(i);
       const grip = this.renderer.xr.getControllerGrip(i);
-      this.scene.add(ray, grip);
+      this.rig.add(ray, grip); // controllers follow the play space
       this.grips.push(grip);
       ray.addEventListener('connected', (e) => {
         this.xrInputs[i] = e.data;
@@ -747,6 +780,7 @@ export class Game {
     this.camera.updateMatrixWorld();
 
     _ray.setFromCamera(this.mouse, this.camera);
+    if (this.rigMoved) _ray.ray.applyMatrix4(_rigInv); // sabers are placed in the play space
     const target = _ray.ray.intersectPlane(_plane, _v) || _v.set(0, 1.2, -0.9);
     const activeIdx = this.mouseLeft ? 0 : 1;
     for (let i = 0; i < 2; i++) {
@@ -762,6 +796,7 @@ export class Game {
         _m.setPosition(handle);
         _ray.ray.intersectPlane(_plane, _v); // restore target
       }
+      if (this.rigMoved) _m.premultiply(this.rig.matrixWorld);
       saber.setMatrix(_m);
     }
   }
@@ -779,9 +814,16 @@ export class Game {
       const next = list[k];
       const prev = list[k - 1];
       let tip;
+      // modcharts: aim at where the note really is (play-space coordinates)
+      const live = next && this.notes.field ? this.notes.field.liveTarget(next.note) : null;
+      if (live) {
+        _live.copy(live);
+        if (this.rigMoved) _live.applyMatrix4(_rigInv);
+      }
       if (next && t >= next.t - AUTO_SWING) {
         const ph = (t - next.t) / AUTO_SWING; // -1..1
-        tip = _v.set(next.x + next.dx * ph * 0.5, next.y + next.dy * ph * 0.5, -AUTO_CUT_Z);
+        if (live) tip = _v.set(_live.x + next.dx * ph * 0.5, _live.y + next.dy * ph * 0.5, Math.max(-1.2, Math.min(0, _live.z)));
+        else tip = _v.set(next.x + next.dx * ph * 0.5, next.y + next.dy * ph * 0.5, -AUTO_CUT_Z);
       } else {
         const from = prev
           ? _from.set(prev.x + prev.dx * 0.5, prev.y + prev.dy * 0.5, -AUTO_CUT_Z)
@@ -802,6 +844,7 @@ export class Game {
       const handle = _v2.set(tip.x * 0.45 + side * 0.15, 0.85 + (tip.y - 1.0) * 0.4, 0.15);
       _m.lookAt(handle, tip, _up);
       _m.setPosition(handle);
+      if (this.rigMoved) _m.premultiply(this.rig.matrixWorld);
       saber.setMatrix(_m);
     }
   }
@@ -815,6 +858,11 @@ export class Game {
     const t = this.audio.time;
     const inGame = IN_GAME.has(this.state);
 
+    // modchart player track: the play space moves before the sabers / head are read
+    if (this.state === 'playing') {
+      this.notes.field?.rt.update(t);
+      this.updateRig();
+    } else if (this.rigMoved) this.resetRig(); // ready / pause menus and results at the usual spot
     if (xr) {
       this.pollXRButtons();
       this.updateXRSabers();
@@ -825,6 +873,7 @@ export class Game {
     } else {
       this.updateDesktopSabers();
       this.headPos.set(this.camera.position.x, this.lean.crouch ? 1.1 : 1.6, 0);
+      if (this.rigMoved) this.headPos.applyMatrix4(this.rig.matrixWorld);
       if (this.pointersActive) this.pointers.updateMouse(this.menu.panels, this.mouse, this.camera);
     }
     if (this.settings.autoplay && (this.state === 'playing' || this.state === 'paused' || this.state === 'ready')) {

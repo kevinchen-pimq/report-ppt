@@ -94,6 +94,98 @@ export function createEdgeGlowMaterial({ color = 0xffffff, fill = 0.15, edge = 0
   });
 }
 
+// Instanced variant (modchart walls: one draw for many walls), for an InstancedBufferGeometry
+// whose per-instance data is one interleaved buffer (28 floats, a single upload):
+//   instM0..instM3  the wall's matrix (columns); the box scale comes from it
+//   instColor       rgb (r < 0: the material's colour) and opacity (Noodle dissolve)
+//   instMotion      walls that only travel (no animation) move on the GPU: xyz = the world
+//                   direction they travel along, w = 1 moving (the matrix is the wall at the
+//                   player, z = 0)
+//   instTiming      jump start time, half jump distance, NJS, despawn time (moving walls
+//                   vanish by themselves after it): such walls are uploaded once, at spawn
+const EDGE_INST_VERT = /* glsl */ `
+  attribute vec4 instM0;
+  attribute vec4 instM1;
+  attribute vec4 instM2;
+  attribute vec4 instM3;
+  attribute vec4 instColor;
+  attribute vec4 instMotion;
+  attribute vec4 instTiming;
+  uniform vec3 color;
+  uniform float songTime;
+  varying vec3 vPos;
+  varying vec3 vNormal;
+  varying vec3 vScale;
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    vPos = position;
+    vNormal = normal;
+    vScale = vec3(length(instM0.xyz), length(instM1.xyz), length(instM2.xyz));
+    vColor = instColor.r < 0.0 ? color : instColor.rgb;
+    vAlpha = instColor.a;
+    vec4 p = mat4(instM0, instM1, instM2, instM3) * vec4(position, 1.0);
+    if (instMotion.w > 0.5) {
+      float e = songTime - instTiming.x;
+      if (songTime > instTiming.w) vAlpha = 0.0;
+      // distance of the wall's front from the player: flying in, then at its NJS
+      float zu = e < 0.0 ? instTiming.y + MOVE_DIST * min(1.0, -e / MOVE_TIME) : instTiming.y - instTiming.z * e;
+      p.xyz -= zu * instMotion.xyz;
+    }
+    if (vAlpha <= 0.002) {
+      gl_Position = vec4(2.0, 2.0, 2.0, 1.0); // gone: outside the view, nothing drawn
+      return;
+    }
+    gl_Position = projectionMatrix * modelViewMatrix * p;
+  }
+`;
+
+const EDGE_INST_FRAG = /* glsl */ `
+  uniform float fill;
+  uniform float edge;
+  uniform float intensity;
+  uniform float whiten;
+  uniform vec3 size;
+  varying vec3 vPos;
+  varying vec3 vNormal;
+  varying vec3 vScale;
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    if (vAlpha <= 0.002) discard;
+    vec3 a = abs(vNormal);
+    vec3 d = (size * 0.5 - abs(vPos)) * vScale;
+    float m = a.x > 0.5 ? min(d.y, d.z) : (a.y > 0.5 ? min(d.x, d.z) : min(d.x, d.y));
+    float e = 1.0 - smoothstep(edge * 0.5, edge, m);
+    float halo = (1.0 - smoothstep(edge, edge * 3.0, m)) * 0.22;
+    float alpha = clamp(max(fill, e) + halo, 0.0, 1.0) * vAlpha;
+    vec3 c = mix(vColor, vec3(1.0), e * whiten) * intensity;
+    gl_FragColor = vec4(c, alpha);
+    #include <colorspace_fragment>
+  }
+`;
+
+/** Edge-glow material for instanced modchart walls (see EDGE_INST_VERT); moveDist / moveTime: the fly-in. */
+export function createInstancedEdgeGlowMaterial({ color = 0xffffff, fill = 0.15, edge = 0.03, intensity = 1, whiten = 0.3, moveDist = 60, moveTime = 0.4 } = {}) {
+  return new THREE.ShaderMaterial({
+    defines: { MOVE_DIST: moveDist.toFixed(4), MOVE_TIME: moveTime.toFixed(4) },
+    uniforms: {
+      color: { value: new THREE.Color(color) },
+      fill: { value: fill },
+      edge: { value: edge },
+      intensity: { value: intensity },
+      whiten: { value: whiten },
+      size: { value: new THREE.Vector3(1, 1, 1) },
+      songTime: { value: 0 },
+    },
+    vertexShader: EDGE_INST_VERT,
+    fragmentShader: EDGE_INST_FRAG,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Silhouette outline ("inverted hull"): the mesh is pushed out along its normals
 // and only its back faces are drawn, so just a ring around the visible shape
