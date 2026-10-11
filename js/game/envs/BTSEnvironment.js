@@ -6,9 +6,10 @@
 //
 // Light groups (v2 basic event type → lights, Chroma lightID n = groups[type][n - 1]):
 //   0  logo ............................ 3   (1 left door, 2 right door, 3 logo reflection)
-//   1  center lasers (rising beams) .... 20  (1–8 left pillars near → far, 2 beams each,
-//                                             9–16 right pillars, 17–18 left far beams,
-//                                             19–20 right far beams)
+//   1  center lasers (rising beams) .... 20  (1–8 left pillars near → far, 2 per pillar: odd =
+//                                             the beam rising from its top, even = a neon strip
+//                                             on the pillar; 9–16 right pillars, 17–18 left far
+//                                             beams, 19–20 right far beams)
 //   2  left lasers ..................... 27  (9 emitters on the left pillars, near/low → far/high,
 //                                             3 beams each)
 //   3  right lasers .................... 27  (mirror of 2)
@@ -183,11 +184,13 @@ export default {
     const lift = rig.proxy(0, 0, 0); // pillar height (event 9); the rising beams follow it
     for (const s of [-1, 1]) {
       for (const [x, z, top] of PILLARS) {
-        for (const lean of [4, 11]) {
-          const a = lean * D2R;
-          const x0 = s * x;
-          rising[s].push(lights.light([{ m: barXYZ(x0, top, z, x0 + s * Math.sin(a) * 140, top + Math.cos(a) * 140, z - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
-        }
+        // odd ID: the beam rising from the top; even ID: a neon strip down the pillar's inner edge
+        // (maps chase the beams with the odd IDs only, the even ones stay lit from "all" events)
+        const a = 7 * D2R;
+        const x0 = s * x;
+        rising[s].push(lights.light([{ m: barXYZ(x0, top, z, x0 + s * Math.sin(a) * 140, top + Math.cos(a) * 140, z - 10, 0.09) }], { fat: 4, rig, proxy: lift }));
+        const xe = s * (x - 1.84 - 0.04); // the diamond's corner facing the track
+        rising[s].push(lights.light([{ m: barXYZ(xe, top - 0.2, z, xe, top - 10, z, 0.1) }], { fat: 2, rig, proxy: lift }));
       }
     }
     const far = { [-1]: [], [1]: [] };
