@@ -32,7 +32,7 @@
   - **譜面自訂顏色**：v2.1 / v4 `colorSchemes`、v2 難度 `_customData`（`_colorLeft`、`_envColorLeft`、`_obstacleColor`…），可在設定中關閉
   - **Chroma**（v2 `_customData` / v3 `customData`，可在設定中關閉）：方塊、炸彈、牆壁、弧線與鏈的顏色；燈光事件的顏色、`lightID`（依原版場景的燈數按比例對應到本遊戲的燈）、`_lightGradient` 漸層、緩動（easing）與 HSV 漸變、v3 過渡事件；光環旋轉 / 縮放（`rotation`、`step`、`prop`、`speed`、`direction`…）、雷射速度（`speed`、`direction`、`lockRotation`）；Chroma 1 的 RGB 燈光事件。場景改造（`environment`）、Noodle Extensions、Vivify 不支援（會被忽略）
   - **v3 / v4 群組燈光**（`lightColorEventBoxGroups`、旋轉、平移、特效群組，v4 的 Lightshow.dat）：篩選（分段、間隔與起點、分塊、隨機、上限、反向）、時間與數值分布、過渡 / 延續、頻閃、旋轉方向與圈數都支援，在有群組燈光的場景模組上播放（沒有對應場景時照舊用預設場景）；沒有群組燈光的譜面在新場景上會用基本燈光事件點亮各燈組
-  - **官方場景**：譜面指定的官方場景（Info.dat 的 `environmentName`）會用重製的版本顯示（23 個，例如 The First、Timbaland、BTS、Billie Eilish、Lady Gaga…；v3 群組燈光的新場景（Weave、EDM、Lattice…）有模組檔就會自動啟用，沒有的用預設場景）。燈光、光環、雷射與各場景的特殊事件（Billie 的雨、Lady Gaga 的線圈高度、BTS 的柱子、Interscope 的車…）都會動；設定「場景」可改成永遠用預設場景或固定一個場景
+  - **官方場景**：譜面指定的官方場景（Info.dat 的 `environmentName`）會用重製的版本顯示（舊場景 23 個，例如 The First、Timbaland、BTS、Billie Eilish、Lady Gaga…；v3 群組燈光的新場景 19 個，例如 Weave、EDM、Lattice、Daft Punk、Metallica…，`envs/` 裡有模組檔就會自動啟用，沒有的用預設場景）。燈光、光環、雷射與各場景的特殊事件（Billie 的雨、Lady Gaga 的線圈高度、BTS 的柱子、Interscope 的車…）都會動；設定「場景」可改成永遠用預設場景或固定一個場景
   - Standard、OneSaber、NoArrows、Lawless、Lightshow 等譜面特性（360/90 度的旋轉事件會被忽略）
 - **遊玩**
   - 左手紅劍、右手藍劍，依箭頭方向揮砍；判定顏色、方向、揮劍速度
@@ -159,7 +159,7 @@ js/game/Environment.js  預設場景與燈光事件；官方場景模組的載�
 js/game/envs/           官方場景重製模組（一個場景一個檔，規格見 envs/CONTRACT.md，共用工具 envs/kit.js）
 js/game/ChromaLighting.js  Chroma 燈光：逐燈狀態、漸層、過渡、光環與雷射動作（只透過 set(r, g, b) 控制燈）
 js/lightshow3.js        v3 / v4 群組燈光解析：篩選、分布、過渡（載入時算好每個元素的關鍵影格）
-js/game/GroupLighting.js  群組燈光播放：每幀只推進指標、算正在變化的元素
+js/game/GroupLighting.js  群組燈光播放：每幀只推進指標、算正在變化的元素；可跳到任意時間（練習模式）
 js/game/lightIds.js     原版各場景每組燈數（Chroma lightID 對應用）
 js/game/FpsMeter.js     幀率顯示（跟著視線的小面板，每 0.5 秒更新）
 js/game/Hud.js          分數 / 連擊 / 血量面板與訊息看板
