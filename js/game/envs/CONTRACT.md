@@ -79,6 +79,49 @@ Environment events in use: Billie 8 rain toggle / 9 ray mode; Lady Gaga 12 / 13 
 heights; Linkin Park 8 laser mode; BTS 9 pillar control; Interscope 8 / 16 / 17 car hydraulics;
 Skrillex's secondary rings use `spinEvent: 9`.
 
+## v3 environments: group lighting (`lightGroups`)
+Newer environments (Weave, Pyro, EDM, The Second, Lizzo, The Weeknd, Rock Mixtape, Dragons 2, Panic 2,
+Queen, Linkin Park 2, Rolling Stones, Lattice, Daft Punk, Hip Hop, Collider, Britney, Monstercat 2,
+Metallica …) are driven by v3 **event box groups** (`lightColorEventBoxGroups`,
+`lightRotationEventBoxGroups`, `lightTranslationEventBoxGroups`, `vfxEventBoxGroups`; v4 Lightshow.dat
+equivalents). Each official *light group* has an id and a fixed number of *elements*; event boxes pick
+elements by index (filters: divide into sections / step & offset / chunks / random / limit, reverse)
+and set colour / brightness, rotation or translation per element, with beat and value distribution
+across the picked elements. A module for such an environment returns, in addition to (or instead of)
+`groups`:
+
+```js
+lightGroups: {
+  [groupId]: {                      // official group id (Info.dat / the map's eventBoxGroups use it)
+    lights: Light[],                // one entry per ELEMENT, in official element order (index 0 … n-1).
+                                    //   An element made of several shapes = one MultiLight. A group that
+                                    //   only rotates / translates (no light) may have lights: [].
+    count,                          // number of elements (defaults to lights.length; set it when the
+                                    //   group has no lights)
+    rotation: {                     // optional: per-element pivots for lightRotationEventBoxGroups
+      x: Object3D[], y: Object3D[], z: Object3D[],   // any subset of axes; arrays indexed by element.
+                                    //   The runtime writes obj.rotation[axis] = rest + angle (degrees →
+                                    //   radians; rest = the rotation when the run starts).
+      mirror: { x?: bool, y?: bool, z?: bool },      // optional: negate the angle (left/right mirrored halves)
+    },
+    translation: {                  // optional: per-element objects for lightTranslationEventBoxGroups
+      x: Object3D[], y: Object3D[], z: Object3D[],
+      scale: 1,                     // metres per map unit (default 1)
+      mirror: { x?: bool, y?: bool, z?: bool },
+    },
+  },
+},
+fx: {                               // optional: vfx event box groups (e.g. fire, fog, particles)
+  [groupId]: { count, set(elementIndex, value) },    // value as distributed by the event box (float)
+},
+```
+
+Rules: element order must follow the official element order (light ID n in Chroma v3 = element n-1);
+keep rotation/translation pivots separate per element (or use a Rig that copies pivot transforms into
+bank instances in `update()`); the runtime never allocates per element per frame, so pivots and lights
+must exist up front. Basic events (`groups`, rings, lasers) still work in v3 environments if the
+environment also has them (some do, e.g. colour boost and a few classic groups).
+
 ## Coordinates
 Metres. The player stands at the origin facing **-Z**; notes come from far -Z toward the player.
 y = 0 is the floor. The game draws the note track, lane lines and the player platform itself
@@ -109,5 +152,7 @@ than 256², no real-time lights or shadows (the scene already has one hemisphere
 
 ## Preview
 `dev/env-preview.html?env=TimbalandEnvironment` renders a module with a simple v2 lighting driver:
-patterns (all on, per-group colours, light-ID chase, ring spin / zoom, laser speed) selectable with
+patterns (all on, per-group colours, light-ID chase, ring spin / zoom, laser speed; for `lightGroups`
+also `vgroups` = one light group at a time, `vchase` = element chase in every group, `vrotate` /
+`vtranslate` = sweep every group's rotation / translation axes) selectable with
 `&pattern=` and an orbit / player camera (`&cam=`, or `&pos=x,y,z&look=x,y,z`). Use it for screenshots.

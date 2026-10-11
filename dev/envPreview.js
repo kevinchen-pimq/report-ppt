@@ -78,14 +78,69 @@ const lasers = env.lasers || { left: [], right: [] };
 // deterministic phases (same picture on every load, for before / after screenshot diffs)
 [...lasers.left, ...lasers.right].forEach((o, i) => (o.userData.phase = (i * 2.399) % (Math.PI * 2)));
 
+// v3 light groups (see CONTRACT.md): rest rotations / positions recorded once
+const lightGroups = env.lightGroups || {};
+const lgIds = Object.keys(lightGroups).map(Number).sort((a, b) => a - b);
+for (const id of lgIds) {
+  const g = lightGroups[id];
+  for (const kind of ['rotation', 'translation']) {
+    for (const ax of ['x', 'y', 'z']) for (const o of g[kind]?.[ax] || []) {
+      o.userData.rest ??= {};
+      o.userData.rest[kind + ax] = kind === 'rotation' ? o.rotation[ax] : o.position[ax];
+    }
+  }
+}
+
 function setAll(type, rgb, k = 1) {
   for (const l of groups[type] || []) l.set(rgb[0] * k, rgb[1] * k, rgb[2] * k);
 }
 
 function drive(t) {
-  const pat = PATTERN === 'cycle' ? ['all', 'groups', 'chase', 'rings', 'lasers'][Math.floor(t / 4) % 5] : PATTERN;
+  const cyc = lgIds.length ? ['all', 'vgroups', 'vchase', 'vrotate', 'vtranslate'] : ['all', 'groups', 'chase', 'rings', 'lasers'];
+  const pat = PATTERN === 'cycle' ? cyc[Math.floor(t / 4) % cyc.length] : PATTERN;
   for (const ty of types) setAll(ty, [0, 0, 0]);
-  if (pat === 'all') for (const ty of types) setAll(ty, ty % 2 ? BLUE : RED);
+  for (const id of lgIds) for (const l of lightGroups[id].lights) l.set(0, 0, 0);
+  if (pat === 'all') {
+    for (const ty of types) setAll(ty, ty % 2 ? BLUE : RED);
+    lgIds.forEach((id, gi) => { const c = gi % 2 ? BLUE : RED; for (const l of lightGroups[id].lights) l.set(...c); });
+  }
+  if (pat === 'vgroups' && lgIds.length) {
+    const id = lgIds[Math.floor(t * 1.5) % lgIds.length];
+    const f = 1 - ((t * 1.5) % 1) * 0.7;
+    for (const l of lightGroups[id].lights) l.set(f, f, f);
+  }
+  if (pat === 'vchase' || pat === 'vrotate' || pat === 'vtranslate') {
+    lgIds.forEach((id, gi) => {
+      const L = lightGroups[id].lights;
+      const head = (t * 10) % (L.length + 3);
+      const c = gi % 2 ? BLUE : RED;
+      L.forEach((l, i) => {
+        const d = head - i;
+        const k = pat === 'vchase' ? (d >= 0 && d < 3 ? 1 - d / 3 : 0.05) : 1;
+        l.set(c[0] * k, c[1] * k, c[2] * k);
+      });
+    });
+  }
+  for (const id of lgIds) {
+    const g = lightGroups[id];
+    for (const kind of ['rotation', 'translation']) {
+      const spec = g[kind];
+      if (!spec) continue;
+      for (const ax of ['x', 'y', 'z']) {
+        (spec[ax] || []).forEach((o, i) => {
+          const rest = o.userData.rest[kind + ax];
+          const mir = spec.mirror?.[ax] ? -1 : 1;
+          if (kind === 'rotation') {
+            const a = pat === 'vrotate' ? Math.sin(t * 1.2 + i * 0.35) * 45 : 0;
+            o.rotation[ax] = rest + THREE.MathUtils.degToRad(a * mir);
+          } else {
+            const d = pat === 'vtranslate' ? Math.sin(t * 1.2 + i * 0.35) * (spec.scale || 1) : 0;
+            o.position[ax] = rest + d * mir;
+          }
+        });
+      }
+    }
+  }
   if (pat === 'groups') {
     // one group at a time, flashing, so every group can be identified
     const ty = types[Math.floor(t * 1.5) % Math.max(1, types.length)];
@@ -144,8 +199,9 @@ function frame() {
     const info = renderer.info.render;
     hud.textContent = `${mod.label || ENV}  pattern ${pat}  t ${t.toFixed(1)}\n` +
       `draw calls ${info.calls}  triangles ${info.triangles}\n` +
-      `groups ${types.map((ty) => `${ty}:${groups[ty].length}`).join('  ')}  rings ${rings.map((r) => `${r.type}×${r.objects.length}`).join(' ')}  lasers L${lasers.left.length} R${lasers.right.length}`;
-    window.__stats = { calls: info.calls, triangles: info.triangles, groups: Object.fromEntries(types.map((ty) => [ty, groups[ty].length])), rings: rings.map((r) => [r.type, r.objects.length]), lasers: [lasers.left.length, lasers.right.length], pattern: pat };
+      `groups ${types.map((ty) => `${ty}:${groups[ty].length}`).join('  ')}  rings ${rings.map((r) => `${r.type}×${r.objects.length}`).join(' ')}  lasers L${lasers.left.length} R${lasers.right.length}` +
+      (lgIds.length ? `\nlight groups ${lgIds.map((id) => `${id}:${lightGroups[id].count ?? lightGroups[id].lights.length}`).join('  ')}` : '');
+    window.__stats = { calls: info.calls, triangles: info.triangles, groups: Object.fromEntries(types.map((ty) => [ty, groups[ty].length])), lightGroups: Object.fromEntries(lgIds.map((id) => [id, lightGroups[id].count ?? lightGroups[id].lights.length])), rings: rings.map((r) => [r.type, r.objects.length]), lasers: [lasers.left.length, lasers.right.length], pattern: pat };
   }
   if (FIXED_T !== null && frames > 3) window.__ready = true;
   requestAnimationFrame(frame);
