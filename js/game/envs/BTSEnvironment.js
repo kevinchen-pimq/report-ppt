@@ -19,7 +19,7 @@
 // ChroMapper's community recreation (facts only); the in-group ID order is approximate.
 // Rings: two 'big' ring sets = the 30 slabs of each striped tower (event 8 "tower spin" rotates
 // them around the vertical axis). Environment event (customEvents) 9 = pillar control: the 4 cubes
-// per side (with the beams rising from them) drop and spring back up (maps send it in quick pairs). Lasers: the 9
+// per side (with the beams rising from them) jump up and fall back, once per event. Lasers: the 9
 // side lights per side swing up / down like a wave with events 12 / 13.
 import { THREE, GEO, GlowBank, Rig, PropBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
@@ -30,15 +30,13 @@ const D2R = Math.PI / 180;
 const PILLAR_W = 3.4; // column width (square, turned 45° so its top reads as a diamond)
 const CUBE = 3.6; // edge of the moving cubes (also turned 45°)
 const HALF_DIAG = Math.SQRT1_2; // corner distance of a 45°-turned square, per unit edge
-// Heights: from the player the row climbs from just above eye level (front) to below the middle
-// of the logo (back) — tops at a view angle of about 1.8° → 4.5° over eye height.
-const PILLARS = Array.from({ length: 9 }, (_, i) => {
-  const z = -38 - i * 5.6;
-  return [6.6, z, 1.7 + (0.031 + 0.048 * (i / 8)) * -z, i % 2 === 1];
-});
+// Heights: even steps down toward the player, from below the middle of the logo (back) to under
+// eye height (front).
+const PILLARS = Array.from({ length: 9 }, (_, i) => [6.6, -38 - i * 5.6, 0.4 + i * 0.98, i % 2 === 1]);
 const TILT_X = 28 * D2R; // pillars lean their tops toward the player (top faces visible) ...
 const TILT_Z = 8 * D2R; // ... and a little toward the track
-const JUMP = 4; // how far the cubes drop before springing back up (event 9)
+const JUMP = 3; // how high the cubes jump (every event 9 is one jump)
+const JUMP_KICK = 0.09; // seconds the cubes are pushed up per jump
 const WAVE_REST = 5 * D2R; // side beams: tilt up at rest ...
 const WAVE_AMP = 8 * D2R; // ... swing up / down by this much ...
 const WAVE_LAG = 0.3; // ... each one this much phase behind the one in front of it
@@ -273,7 +271,7 @@ export default {
     });
 
     const banks = [...lights.banks, clouds, slabs];
-    let cubesDown = false;
+    let jumpUntil = -1; // song time until which the cubes are pushed up
     const wave = { last: [0, 0], env: [0, 0] };
     return {
       root,
@@ -285,19 +283,19 @@ export default {
       ],
       lasers,
       customEvents: [9],
-      onEvent(type) {
-        if (type === 9) cubesDown = !cubesDown; // pillar control
+      onEvent(type, value, e, time) {
+        if (type === 9) jumpUntil = Math.max(jumpUntil, (e ? e.time : time) + JUMP_KICK); // pillar control: a jump
       },
       reset() {
-        cubesDown = false;
+        jumpUntil = -1;
         wave.last.fill(0);
         wave.env.fill(0);
       },
       update(t, dt) {
-        const target = cubesDown ? -JUMP : 0;
+        const target = t < jumpUntil ? JUMP : 0;
         const y = lift.position.y;
         if (y !== target) {
-          lift.position.y = Math.abs(target - y) < 1e-3 ? target : y + (target - y) * (1 - Math.exp(-14 * dt));
+          lift.position.y = Math.abs(target - y) < 1e-3 ? target : y + (target - y) * (1 - Math.exp(-(target > y ? 22 : 9) * dt));
           pillars.position.y = lift.position.y;
           pillars.updateMatrix();
         }
