@@ -242,7 +242,7 @@ export default {
         list.push(p);
         const chain = moves ? [lift, p] : p;
         groups[type].push(
-          lights.light([{ m: beam(s, 160, 0.06) }], { fat: 4, glowGain: 0.8, rig, proxy: chain }),
+          lights.light([{ m: beam(s, 160, 0.08) }], { fat: 5, glowGain: 1.6, rig, proxy: chain }),
           lights.light([{ m: barXYZ(-0.25, 0, 0, 0.25, 0, 0, 0.35), g: null }], { rig, proxy: chain }),
           lights.light([{ m: beam(s, 7, 0.16), g: null }], { coreGain: 0.5, rig, proxy: chain }),
         );
@@ -285,7 +285,7 @@ export default {
       lasers,
       customEvents: [9],
       onEvent(type, value, e, time) {
-        if (type === 9) jumpUntil = Math.max(jumpUntil, (e ? e.time : time) + JUMP_KICK); // pillar control: a jump
+        if (type === 9) jumpUntil = (e ? e.time : time) + JUMP_KICK; // pillar control: a jump
       },
       reset() {
         jumpUntil = -1;

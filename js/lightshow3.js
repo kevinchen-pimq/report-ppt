@@ -217,6 +217,8 @@ function filterKey(f) {
   return `${f.type},${f.p0},${f.p1},${f.reverse ? 1 : 0},${f.chunks},${f.random},${f.seed},${f.limit},${f.limitAffects}`;
 }
 
+const toLinear = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+
 /** Chroma-style colour [r, g, b, a?] -> [r, g, b, brightness] (hue kept for HDR values), or null. */
 function chromaColor(cd) {
   const c = cd && typeof cd === 'object' ? cd.color ?? cd._color : null;
@@ -232,7 +234,8 @@ function chromaColor(cd) {
     b /= max;
     k *= Math.min(max, 1.5);
   }
-  return [r, g, b, Math.min(k, 1.5)];
+  // sRGB like the palette's hex colours -> linear for the renderer
+  return [toLinear(r), toLinear(g), toLinear(b), Math.min(k, 1.5)];
 }
 
 /** v4 / v3 rotation, translation, fx transition: p 1 = extend, else transition with easing (-1 = instant). */

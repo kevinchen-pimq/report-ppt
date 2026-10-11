@@ -134,10 +134,13 @@ export class Light {
     this.r = r;
     this.g = g;
     this.b = b;
+    // over-bright: scale the channels together (each one capped at 1 on its own turns any colour white)
+    const max = Math.max(r, g, b);
+    const k = max > 1 ? 1 / max : 1;
     const a = this.bank.mesh.instanceColor.array;
-    a[this.index * 3] = r;
-    a[this.index * 3 + 1] = g;
-    a[this.index * 3 + 2] = b;
+    a[this.index * 3] = r * k;
+    a[this.index * 3 + 1] = g * k;
+    a[this.index * 3 + 2] = b * k;
     this.bank.dirtyColor = true;
   }
 }
@@ -157,7 +160,9 @@ export class MeshLight {
     this.r = r;
     this.g = g;
     this.b = b;
-    this.mesh.material.color.setRGB(r, g, b);
+    const max = Math.max(r, g, b);
+    const k = max > 1 ? 1 / max : 1; // keep the hue when over-bright (see Light.set)
+    this.mesh.material.color.setRGB(r * k, g * k, b * k);
     this.mesh.visible = r + g + b > 0.002;
   }
 }

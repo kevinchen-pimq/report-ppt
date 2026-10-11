@@ -540,6 +540,16 @@ function lightColor(c) {
   return [r, g, b, Math.min(k, 1.5)];
 }
 
+/** sRGB channel (0..1) -> linear. Chroma colours are sRGB like the palette's hex colours. */
+const toLinear = (v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+
+/** Light colour for the renderer: lightColor() with r, g, b converted from sRGB to linear. */
+function lightColorLinear(c) {
+  const out = lightColor(c);
+  if (out) for (let i = 0; i < 3; i++) out[i] = toLinear(out[i]);
+  return out;
+}
+
 /** Note / bomb / wall / arc colour from its customData -> 0xRRGGBB (hue kept for HDR values), or null. */
 function objColor(cd) {
   if (!cd || typeof cd !== 'object') return null;
@@ -557,7 +567,7 @@ function applyLegacyChroma(events) {
   for (const e of events) {
     if (e.value >= LEGACY_RGB) {
       const v = e.value - LEGACY_RGB;
-      colors.set(e.type, [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255, 1]);
+      colors.set(e.type, [toLinear(((v >> 16) & 255) / 255), toLinear(((v >> 8) & 255) / 255), toLinear((v & 255) / 255), 1]);
       found++;
       continue;
     }
@@ -588,7 +598,7 @@ function parseChromaEvent(cd, type, beat, toTime) {
         any = true;
       }
     }
-    const color = lightColor(pick('_color', 'color'));
+    const color = lightColorLinear(pick('_color', 'color'));
     if (color) {
       ch.color = color;
       any = true;
@@ -598,8 +608,8 @@ function parseChromaEvent(cd, type, beat, toTime) {
       const durBeats = Math.max(0, num(g._duration) ?? 0);
       ch.grad = {
         dur: Math.max(0, toTime(beat + durBeats) - toTime(beat)),
-        start: lightColor(g._startColor) || [1, 1, 1, 1],
-        end: lightColor(g._endColor) || [1, 1, 1, 1],
+        start: lightColorLinear(g._startColor) || [1, 1, 1, 1],
+        end: lightColorLinear(g._endColor) || [1, 1, 1, 1],
         ease: chromaEasing(g._easing) || CHROMA_EASINGS.easeLinear,
       };
       any = true;
