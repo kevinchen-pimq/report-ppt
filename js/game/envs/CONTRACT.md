@@ -112,7 +112,8 @@ lightGroups: {
   },
 },
 fx: {                               // optional: vfx event box groups (e.g. fire, fog, particles)
-  [groupId]: { count, set(elementIndex, value) },    // value as distributed by the event box (float)
+  [groupId]: { count, set(elementIndex, value), initial? },  // value as distributed by the event box
+                                    //   (float); initial = value before the first event
 },
 ```
 
@@ -121,6 +122,35 @@ keep rotation/translation pivots separate per element (or use a Rig that copies 
 bank instances in `update()`); the runtime never allocates per element per frame, so pivots and lights
 must exist up front. Basic events (`groups`, rings, lasers) still work in v3 environments if the
 environment also has them (some do, e.g. colour boost and a few classic groups).
+
+How the runtime (`js/game/GroupLighting.js`, parsing and maths in `js/lightshow3.js`) plays them:
+- `count` is what the index filters divide (sections, step / offset, chunks, limit), so give the
+  official element count even when fewer lights are drawn (elements without a light are skipped).
+  Without `count`: the number of lights (or pivots).
+- Colour: event colour 0 / 1 / 2 = the scheme's left / right / white environment colour (boost colours
+  while colour boost, basic event 5, is on) × brightness, `light.set(r, g, b)`; strobes alternate with
+  the strobe brightness. An element is off (0, 0, 0) until its first event. With the Chroma setting on,
+  `customData.color` on a box event replaces the colour.
+- Rotation / translation are applied exactly as written above, with no handedness conversion by
+  the runtime: `obj.rotation[axis] = rest + degToRad(angle)` and `obj.position[axis] = rest + value ×
+  scale` (value in map units, `scale` metres per unit, default 1), each negated only when the group's
+  `mirror[axis]` is set. Converting Beat Saber's left-handed frame is the module's job (e.g. build
+  inside a child group with scale.z = -1, or negated mount axes). The event box's own "invert axis"
+  flag (map data) negates the value before that. The angle is unwrapped (auto = shortest way,
+  clockwise = increasing angle, plus 360° per loop), so `rest + angle` never jumps. Pivots go back
+  to rest at every new run; `rest` is read when the module is built.
+- fx: `set(element, value)` whenever the value changes. Before an element's first event it gets the
+  optional `fx[groupId].initial` (else the value of its first event); elements without events are
+  never set.
+- Seeking (practice mode): the runtime can jump to any song time, forward or backward, and every
+  element then shows exactly its state at that time; modules need nothing for it.
+- Order per frame: basic events / rings / lasers → group lighting → the module's `update()` → banks.
+- The environment is enabled automatically when its file exists (`envs/<Name>.js`, checked when the
+  app starts); the `'v3'` mark in `list.js` only says it is a group-lighting environment.
+- Maps without event box groups still light a v3 module: its light groups (in id order) are spread
+  over the map's basic light event types. A v3 map shown where there are no light groups (our
+  scenery, an environment without `lightGroups`) looks as before; `Environment.approximateV3 = true`
+  would instead spread its colour box groups over the basic lights (off by default).
 
 ## Coordinates
 Metres. The player stands at the origin facing **-Z**; notes come from far -Z toward the player.

@@ -3,6 +3,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { COLOR_LEFT, COLOR_RIGHT } from './constants.js';
 import { envLightCounts } from './lightIds.js';
 import { ChromaLighting, LIGHT_TYPES } from './ChromaLighting.js';
+import { GroupLighting } from './GroupLighting.js';
 import { ENVIRONMENTS } from './envs/list.js';
 
 // Light groups driven by basic beatmap events:
@@ -20,8 +21,35 @@ const _m = new THREE.Matrix4();
 // ---------------------------------------------------------------------------
 // Environment modules (js/game/envs/<Name>.js, see envs/CONTRACT.md)
 
+// v3 (group lighting) environments are enabled when their module file exists: checked once at
+// start-up (HEAD requests, in parallel, given up after a short time), so a module dropped into
+// envs/ is picked up without editing list.js. The import itself can still fail later: prepare()
+// then falls back to our own scenery.
+async function findV3Modules() {
+  const names = ENVIRONMENTS.filter(([, , v3]) => v3).map(([n]) => n);
+  if (!names.length || typeof fetch !== 'function' || typeof location === 'undefined') return [];
+  const ctl = typeof AbortController === 'function' ? new AbortController() : null;
+  const timer = setTimeout(() => ctl?.abort(), 2500);
+  try {
+    const found = await Promise.all(names.map(async (name) => {
+      try {
+        const r = await fetch(new URL(`./envs/${name}.js`, import.meta.url), { method: 'HEAD', signal: ctl?.signal });
+        const type = r.headers.get('content-type') || '';
+        // a static host may answer a missing file with its index page: only a script counts
+        return r.ok && (!type || /javascript|ecmascript/i.test(type)) ? name : null;
+      } catch (e) {
+        return null;
+      }
+    }));
+    return found.filter(Boolean);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+const V3_FOUND = new Set(await findV3Modules().catch(() => []));
+
 /** Official environments that have a module (Info.dat name -> label). */
-export const ENV_MODULES = ENVIRONMENTS.filter(([, , v3]) => !v3).map(([name, label]) => ({ name, label }));
+export const ENV_MODULES = ENVIRONMENTS.filter(([name, , v3]) => !v3 || V3_FOUND.has(name)).map(([name, label]) => ({ name, label }));
 const MODULE_NAMES = new Set(ENV_MODULES.map((m) => m.name));
 
 /** Whether an environment (Info.dat name) has a module. */
@@ -185,7 +213,14 @@ export class Environment {
     this.buildStars();
     this.setIdle();
     // Chroma lighting runtime driving our lights / rings / lasers
-    this.chroma = new ChromaLighting(this.buildChromaTarget(), this.colors);
+    this.chromaTarget = this.buildChromaTarget();
+    this.chroma = new ChromaLighting(this.chromaTarget, this.colors);
+    // v3 maps (event box groups) without basic light events, shown where there are no light groups
+    // (our scenery, environments without lightGroups): false = as before (idle lights);
+    // true = the colour box groups are approximated on the basic lights
+    this.approximateV3 = false;
+    this.approx = null; // { source, lighting: GroupLighting } while in use
+    this.approxFrame = (t) => this.approx.lighting.update(t, this.chroma.boost);
   }
 
   mat(group, vertexColors = false) {
@@ -416,6 +451,13 @@ export class Environment {
     this.colors.white.set(white ?? 0xffffff);
     this.colors.whiteBoost.set(whiteBoost ?? white ?? 0xffffff);
     this.chroma?.markAllDirty();
+    this.approx?.lighting.markAllDirty();
+    if (this.mod) {
+      this.mod.lighting.markAllDirty();
+      this.mod.group?.markAllDirty();
+      this.mod.approx?.lighting.markAllDirty();
+      this.mod.compat?.lighting.markAllDirty();
+    }
   }
 
   /** 'L' | 'R' | 'W' -> current colour, honouring colour boost */
@@ -475,16 +517,31 @@ export class Environment {
     }, this.colors);
     const update = built.update;
     const lights4 = (built.groups && built.groups[4]) || [];
-    this.mod = {
+    // v3 group lighting (lightGroups / fx), see GroupLighting.js
+    const hasV3 = (built.lightGroups && Object.keys(built.lightGroups).length) || (built.fx && Object.keys(built.fx).length);
+    const group = hasV3 ? new GroupLighting({ lightGroups: built.lightGroups || {}, fx: built.fx || {} }, this.colors) : null;
+    const mod = {
       name,
       def,
       built,
       lighting,
-      envUpdate: update ? (t, dt) => update.call(built, t, dt) : null,
+      group, // GroupLighting for the module's lightGroups (null: none)
+      groupMode: null, // per run: 'direct' (box groups) | 'compat' (basic events on lightGroups) | 'approx' (box groups on groups)
+      compat: null, // { source, lighting: ChromaLighting } basic events on the lightGroups' lights
+      approx: null, // { source, lighting: GroupLighting } box groups on the basic groups' lights
       runway: lights4, // our runway edges follow the brightest of these
       background: built.background ?? def.background ?? null,
       fog: built.fog ?? def.fog ?? null,
     };
+    // every frame: lights / rings / lasers (ChromaLighting) -> group lighting -> the module's own
+    // update -> bank uploads
+    mod.envUpdate = (t, dt) => {
+      if (mod.groupMode === 'direct') mod.group.update(t, lighting.boost);
+      else if (mod.groupMode === 'compat') mod.compat.lighting.update(t, dt);
+      else if (mod.groupMode === 'approx') mod.approx.lighting.update(t, lighting.boost);
+      if (update) update.call(built, t, dt);
+    };
+    this.mod = mod;
     if (renderer && camera) {
       // compile the module's shaders now (they would otherwise compile on the first frame)
       built.root.visible = true;
@@ -535,12 +592,33 @@ export class Environment {
    * the module's lights directly when the map was made for this environment, else they are
    * mapped proportionally from the map's environment.
    */
-  resetModule(mod, events, chroma, environment) {
+  resetModule(mod, events, chroma, environment, lightshow) {
     this.showModule(mod);
     this.setChromaMode(false); // our runway strips: plain geometry, coloured below
     const direct = !environment || environment === mod.name;
     const counts = direct ? null : envLightCounts(environment);
-    const lit = events.some((e) => LIGHT_TYPES.includes(e.type));
+    const basicLit = events.some((e) => LIGHT_TYPES.includes(e.type));
+    const boxLit = !!lightshow?.color?.length;
+    // v3 group lighting: the map's box groups on the module's lightGroups ('direct'); a map
+    // without box groups lights them with its basic events ('compat'); a module without
+    // lightGroups shows the box groups on its basic groups when the map has no basic lights ('approx')
+    mod.groupMode = null;
+    if (mod.group) {
+      mod.group.reset(lightshow || null, { chroma });
+      if (lightshow) mod.groupMode = 'direct';
+      else {
+        mod.groupMode = 'compat';
+        if (!mod.compat || mod.compat.source !== events) mod.compat = { source: events, lighting: compatLighting(mod.built.lightGroups || {}, events, this.colors) };
+        mod.compat.lighting.reset(events, compatStart(mod.compat.lighting, events));
+      }
+    } else if (this.approximateV3 && boxLit && !basicLit) {
+      mod.groupMode = 'approx';
+      if (!mod.approx || mod.approx.source !== lightshow) {
+        mod.approx = { source: lightshow, lighting: new GroupLighting({ lightGroups: approxLightGroups(lightshow, mod.built.groups || {}, mod.lighting.types) }, this.colors) };
+      }
+      mod.approx.lighting.reset(lightshow, { chroma });
+    }
+    const lit = basicLit || (boxLit && !!mod.groupMode && mod.groupMode !== 'compat');
     const startOn = {};
     const startLeft = {};
     if (!lit) {
@@ -586,10 +664,11 @@ export class Environment {
    * gradients, ring / laser motion); opts.environment: the map's environment (light IDs);
    * opts.module: show the prepared environment module. reset([]) = no run (our scenery).
    */
-  reset(events, { chroma = false, environment = null, module = false } = {}) {
+  reset(events, { chroma = false, environment = null, module = false, lightshow = null } = {}) {
     if (module && this.mod) {
       this.events = events || [];
-      this.resetModule(this.mod, this.events, chroma, environment);
+      this.approx = null;
+      this.resetModule(this.mod, this.events, chroma, environment, lightshow);
       return;
     }
     if (this.active) this.showModule(null);
@@ -598,6 +677,19 @@ export class Environment {
     this.ringSpinVel = 0;
     this.ringZoomTarget = 1;
     this.boost = false;
+    // a v3 map lit only by event box groups: shown on our lights (per-light colours) through
+    // the group lighting, spread over our back lasers, rings and side lasers
+    const approx = this.approximateV3 && !!lightshow?.color?.length && !this.events.some((e) => LIGHT_TYPES.includes(e.type));
+    if (approx) {
+      if (!this.approx || this.approx.source !== lightshow) {
+        this.approx = { source: lightshow, lighting: new GroupLighting({ lightGroups: approxLightGroups(lightshow, this.chromaTarget.groups, [0, 1, 2, 3]) }, this.colors) };
+      }
+      this.approx.lighting.reset(lightshow, { chroma });
+      this.setChromaMode(true);
+      this.chroma.reset(this.events, { counts: envLightCounts(environment), startOn: { 4: 0.6 }, chroma });
+      return;
+    }
+    this.approx = null;
     this.setChromaMode(chroma);
     if (!this.events.some((e) => e.type <= 4)) this.setIdle();
     else {
@@ -644,6 +736,17 @@ export class Environment {
     } else if (e.type === 13) {
       this.laserSpeed[1] = e.value;
     }
+  }
+
+  /**
+   * Jumps the v3 group lighting (module light groups, or the approximation on our lights) to song
+   * time t: exact state at t, any direction. The per-frame update also follows a backwards jump.
+   */
+  seekGroupLighting(t) {
+    const mod = this.active;
+    if (mod?.groupMode === 'direct') mod.group.seek(t, mod.lighting.boost);
+    else if (mod?.groupMode === 'approx') mod.approx.lighting.seek(t, mod.lighting.boost);
+    else if (!mod && this.approx) this.approx.lighting.seek(t, this.chroma.boost);
   }
 
   update(t, dt) {
@@ -754,10 +857,62 @@ export class Environment {
   }
 
   updateChroma(t, dt) {
-    this.chroma.update(t, dt);
+    this.chroma.update(t, dt, this.approx ? this.approxFrame : null);
     this.syncLasers();
     this.syncRings();
   }
+}
+
+// ---------------------------------------------------------------------------
+// v3 group lighting fallbacks
+
+/**
+ * A map's colour box groups spread over basic event groups (environment without lightGroups):
+ * group ids in order go round-robin over the light types; the groups sharing a type split its
+ * lights between them. Returns lightGroups for GroupLighting.
+ */
+function approxLightGroups(lightshow, groups, types) {
+  const ids = [...new Set(lightshow.color.map((g) => g.g))].sort((a, b) => a - b);
+  const T = types.filter((t) => groups[t] && groups[t].length);
+  const out = {};
+  if (!T.length) return out;
+  T.forEach((type, j) => {
+    const mine = ids.filter((_, gi) => gi % T.length === j);
+    const lights = groups[type];
+    mine.forEach((id, q) => {
+      const lo = Math.floor((q * lights.length) / mine.length);
+      const hi = Math.floor(((q + 1) * lights.length) / mine.length);
+      out[id] = { lights: hi > lo ? lights.slice(lo, hi) : [lights[q % lights.length]] };
+    });
+  });
+  return out;
+}
+
+/** Basic events on a v3 module's lightGroups (map without box groups): group ids round-robin over the map's light types. */
+function compatLighting(lightGroups, events, colors) {
+  const used = LIGHT_TYPES.filter((t) => events.some((e) => e.type === t));
+  const T = used.length ? used : [0, 1, 2, 3, 4];
+  const ids = Object.keys(lightGroups).map(Number).filter((id) => lightGroups[id]?.lights?.length).sort((a, b) => a - b);
+  const groups = {};
+  ids.forEach((id, gi) => {
+    const type = T[gi % T.length];
+    (groups[type] ||= []).push(...lightGroups[id].lights);
+  });
+  return new ChromaLighting({ groups, rings: [], lasers: { left: [], right: [] }, banks: [] }, colors);
+}
+
+/** Reset options for compatLighting: everything on when the map has no light events. */
+function compatStart(lighting, events) {
+  const lit = events.some((e) => LIGHT_TYPES.includes(e.type));
+  const startOn = {};
+  const startLeft = {};
+  if (!lit) {
+    for (const type of lighting.types) {
+      startOn[type] = 0.6;
+      startLeft[type] = type % 2 === 0;
+    }
+  }
+  return { startOn, startLeft, chroma: false };
 }
 
 /** Per-light colours of one mesh (instance or vertex colours); flushed once per frame. */

@@ -463,7 +463,7 @@ export class Game {
     this.arcs.chroma = chroma;
     this.notes.reset(this.map);
     this.arcs.reset(this.map);
-    this.env.reset(this.map.events, { chroma: this.chromaLights(), environment: this.meta.environment, module: !!this.runEnv });
+    this.env.reset(this.map.events, { chroma: this.chromaLights(), environment: this.meta.environment, module: !!this.runEnv, lightshow: this.map.lightshow || null });
     this.score.reset(this.map.maxScore);
     this.effects.clear();
     this.hud.clearPopups();

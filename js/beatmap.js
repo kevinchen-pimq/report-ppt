@@ -1,5 +1,6 @@
 // Parses Beat Saber difficulty files (v2, v3, v4) into a normalized,
 // seconds-based representation used by the game.
+import { parseLightshow3, hasLightshow3, countLightshow3Chroma } from './lightshow3.js';
 
 const DEFAULT_NJS = { Easy: 10, Normal: 10, Hard: 10, Expert: 12, ExpertPlus: 16 };
 
@@ -141,9 +142,10 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
     for (const a of json.sliders || []) {
       raw.arcs.push({ beat: a.b, c: a.c ?? 0, x: a.x ?? 0, y: a.y ?? 0, d: a.d ?? 8, mu: a.mu ?? 1, tb: a.tb, tx: a.tx ?? 0, ty: a.ty ?? 0, tc: a.tc ?? 8, tmu: a.tmu ?? 1, m: a.m ?? 0, ch: objColor(a.customData) });
     }
-    for (const e of json.basicBeatmapEvents || []) raw.events.push({ beat: e.b, type: e.et, value: e.i, f: e.f ?? 1, cd: e.customData });
-    for (const e of json.colorBoostBeatmapEvents || []) raw.events.push({ beat: e.b, type: 5, value: e.o ? 1 : 0, f: 1 });
-    for (const e of json.bpmEvents || []) raw.bpmChanges.push({ beat: e.b, bpm: e.m });
+    // omitted v3 fields are 0
+    for (const e of json.basicBeatmapEvents || []) raw.events.push({ beat: e.b ?? 0, type: e.et ?? 0, value: e.i ?? 0, f: e.f ?? 1, cd: e.customData });
+    for (const e of json.colorBoostBeatmapEvents || []) raw.events.push({ beat: e.b ?? 0, type: 5, value: e.o ? 1 : 0, f: 1 });
+    for (const e of json.bpmEvents || []) raw.bpmChanges.push({ beat: e.b ?? 0, bpm: e.m });
   } else {
     const cnd = json.colorNotesData || [];
     for (const n of json.colorNotes || []) {
@@ -185,12 +187,12 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
       const cbd = lightshow.colorBoostEventsData || [];
       for (const e of lightshow.colorBoostEvents || []) {
         const d = cbd[e.i ?? 0] || {};
-        raw.events.push({ beat: e.b, type: 5, value: d.b ? 1 : 0, f: 1 });
+        raw.events.push({ beat: e.b ?? 0, type: 5, value: d.b ? 1 : 0, f: 1 });
       }
       const bed = lightshow.basicEventsData || [];
       for (const e of lightshow.basicEvents || []) {
         const d = bed[e.i ?? 0] || {};
-        raw.events.push({ beat: e.b, type: d.t ?? 0, value: d.i ?? 0, f: d.f ?? 1 });
+        raw.events.push({ beat: e.b ?? 0, type: d.t ?? 0, value: d.i ?? 0, f: d.f ?? 1 });
       }
     }
   }
@@ -245,6 +247,26 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
     .sort((a, b) => a.time - b.time);
   chromaEvents += applyLegacyChroma(events);
 
+  // v3 / v4 group lighting (event box groups), played by js/game/GroupLighting.js: parsed on
+  // first use (map.lightshow), so showing a song's details stays quick
+  const lsSource = version === 3 ? json : version === 4 ? lightshow : null;
+  const lsVersion = version === 3 ? 3 : 4;
+  const hasBoxes = hasLightshow3(lsSource, lsVersion);
+  if (hasBoxes) chromaEvents += countLightshow3Chroma(lsSource, lsVersion);
+  let lightshow3;
+  const getLightshow = () => {
+    if (lightshow3 === undefined) {
+      lightshow3 = null;
+      try {
+        lightshow3 = hasBoxes ? parseLightshow3(lsSource, lsVersion) : null;
+      } catch (e) {
+        console.warn('燈光群組資料無法讀取', e);
+      }
+      if (lightshow3) lightshow3.toTime = toTime;
+    }
+    return lightshow3;
+  };
+
   const arcs = raw.arcs
     .filter((a) => Number.isFinite(a.beat) && Number.isFinite(a.tb) && a.tb > a.beat)
     .map((a) => buildArc(a, toTime))
@@ -263,12 +285,16 @@ export function parseDifficulty(json, { info, diff, audioData, lightshow }) {
   for (const w of walls) if (w.chroma != null) chromaObjects++;
   for (const a of arcs) if (a.chroma != null) chromaObjects++;
 
-  return {
+  const result = {
     version, njs, halfJump, notes, walls, arcs, events, colorNotes, links, lastTime,
     njsEvents: raw.njs.length, njsAt, maxScore: computeMaxScore(notes),
     // Chroma data found in this difficulty (used only when the chroma setting is on)
     chroma: { events: chromaEvents, objects: chromaObjects, used: chromaEvents + chromaObjects > 0 },
+    hasLightshow: hasBoxes, // v3 event box groups present
   };
+  // map.lightshow: the parsed event box groups (js/lightshow3.js) or null
+  Object.defineProperty(result, 'lightshow', { get: getLightshow, enumerable: true });
+  return result;
 }
 
 // Expands a chain (burst slider) into link pieces following the game's quadratic curve
