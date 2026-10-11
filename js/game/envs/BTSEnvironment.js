@@ -10,8 +10,9 @@
 //                                             beam, left strip, right beam, right strip — odd =
 //                                             the beam rising from a pillar top, even = a neon
 //                                             strip on it; 17–18 left far beams, 19–20 right)
-//   2  left lasers ..................... 27  (27 emitters along the left pillars, near/low →
-//                                             far/high, one beam each shooting sideways)
+//   2  left lasers ..................... 27  (9 side lights × 3 IDs: beam, emitter glow, flare;
+//                                             front block, then per pillar near → far a fixed
+//                                             light and one moving with the pillar)
 //   3  right lasers .................... 27  (mirror of 2)
 //   4  runway lights ................... 5   (1 left rail, 2 right rail, 3 left stair edge,
 //                                             4 right stair edge, 5 cross bar at the stair foot)
@@ -19,8 +20,8 @@
 // ChroMapper's community recreation (facts only); the in-group ID order is approximate.
 // Rings: two 'big' ring sets = the 30 slabs of each striped tower (event 8 "tower spin" rotates
 // them around the vertical axis). Environment event (customEvents) 9 = pillar control: the eight
-// pillars (with the beams rising from them) sink 8 m into the clouds / rise again. Lasers: the 27
-// emitters per side spin around the sideways axis with events 12 / 13 (each beam sweeps a cone).
+// pillars (with the beams rising from them) sink 8 m into the clouds / rise again. Lasers: the 9
+// side lights per side spin around the sideways axis with events 12 / 13 (each beam sweeps a cone).
 import { THREE, GEO, GlowBank, Rig, PropBank, MultiLight, SoftGlow, barXYZ, wash, stdMat, mergeGeos } from './kit.js';
 
 const D2R = Math.PI / 180;
@@ -31,6 +32,8 @@ const PILLARS = [
   [8.0, -66, 8.5],
   [8.4, -76, 10.5],
 ];
+const FRONT_X = 7.0; // block in front of the pillars
+const FRONT_Z = -38;
 const LOGO_Z = -90;
 const LOGO_Y = 10;
 
@@ -65,6 +68,10 @@ export default {
         g.translate(s * x, top - h / 2, z);
         pg.push(g);
       }
+      // the block in front of the pillar row (carries a side light)
+      const fb = new THREE.BoxGeometry(2.2, 6, 2.2);
+      fb.translate(s * FRONT_X, 1.4 + 1 - 3, FRONT_Z);
+      sg.push(fb);
       // big blocks flanking the logo
       const b = new THREE.BoxGeometry(3.6, 30, 5);
       b.translate(s * 5.6, LOGO_Y + 4 - 15, LOGO_Z + 3);
@@ -202,17 +209,28 @@ export default {
     }
     groups[1].push(...rising, ...far[-1], ...far[1]);
 
-    // 2 / 3: 27 laser emitters per side, one beam each, shooting sideways away from the track;
-    // events 12 / 13 spin each beam around the sideways axis, so it sweeps a cone (not a full circle)
+    // 2 / 3: 9 side lights per side: one on the block in front of the pillars, then per pillar
+    // (near → far) a fixed one low down and one near the top that rises / sinks with the pillar.
+    // One beam each, shooting sideways; 3 light IDs per light (beam, emitter glow, flare at the
+    // beam's foot). Events 12 / 13 spin each beam around the sideways axis, so it sweeps a cone.
     const lasers = { left: [], right: [] };
     const cone = 22 * D2R;
+    const beam = (s, len, w) => barXYZ(0, 0, 0, s * Math.cos(cone) * len, Math.sin(cone) * len, 0, w);
     for (const [type, s, list] of [[2, -1, lasers.left], [3, 1, lasers.right]]) {
-      for (let k = 0; k < 27; k++) {
-        const p = rig.proxy(s * (9.0 + k * 0.04), 0.2 + k * 0.33, -42 - k * 1.42);
+      const mounts = [[s * (FRONT_X + 1.1), 1.4, FRONT_Z, false]];
+      for (const [x, z, top] of PILLARS) {
+        mounts.push([s * (x + 1.9), top * 0.4, z, false], [s * (x + 1.9), top - 1.2, z, true]);
+      }
+      for (const [x, y, z, moves] of mounts) {
+        const p = rig.proxy(x, y, z);
         p.userData.axis = 'x';
         list.push(p);
-        const m = barXYZ(0, 0, 0, s * Math.cos(cone) * 160, Math.sin(cone) * 160, 0, 0.06);
-        groups[type].push(lights.light([{ m }], { fat: 4, glowGain: 0.8, rig, proxy: p }));
+        const chain = moves ? [lift, p] : p;
+        groups[type].push(
+          lights.light([{ m: beam(s, 160, 0.06) }], { fat: 4, glowGain: 0.8, rig, proxy: chain }),
+          lights.light([{ m: barXYZ(-0.25, 0, 0, 0.25, 0, 0, 0.35), g: null }], { rig, proxy: chain }),
+          lights.light([{ m: beam(s, 7, 0.16), g: null }], { coreGain: 0.5, rig, proxy: chain }),
+        );
       }
     }
 
