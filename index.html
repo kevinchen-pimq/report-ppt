@@ -24,6 +24,21 @@
 <body>
   <div id="scene"></div>
 
+  <!-- Practice mode while playing on the computer (shown by js/practiceUI.js) -->
+  <div id="practice-bar" class="practice-bar" hidden>
+    <span class="pb-tag">練習</span>
+    <output id="pb-time" class="pb-time">0:00</output>
+    <input type="range" id="pb-seek" min="0" max="60" step="0.5" value="0" aria-label="歌曲位置" />
+    <output id="pb-total" class="pb-time">0:00</output>
+    <span class="pb-group">
+      <button id="pb-slower" type="button" aria-label="變慢">−</button>
+      <output id="pb-rate" class="pb-rate">100%</output>
+      <button id="pb-faster" type="button" aria-label="變快">+</button>
+      <button id="pb-reset" type="button">恢復 100%</button>
+    </span>
+    <span class="pb-keys">← / → 前後 5 秒 · [ / ] 速度 · 空白鍵 暫停</span>
+  </div>
+
   <main id="menu">
     <!-- Top bar: logo, main tabs, VR button -->
     <header class="topbar">
@@ -196,6 +211,21 @@
             <div id="diffs" class="diffs"></div>
             <div id="diff-stats" class="muted small-text stats-line"></div>
             <div id="diff-env" class="muted small-text stats-line"></div>
+            <div class="practice">
+              <label class="switch"><input type="checkbox" id="practice-on" /><span>練習模式<small>可以選從哪裡開始、調整速度；不會失敗，也不記錄成績</small></span></label>
+              <div id="practice-opts" class="practice-opts" hidden>
+                <label class="range">開始位置 <output id="practice-start-out">從頭開始</output>
+                  <input type="range" id="practice-start" min="0" max="60" step="1" value="0" /></label>
+                <div class="practice-speed">
+                  <span class="practice-label">速度</span>
+                  <button id="practice-slower" class="btn small" type="button" aria-label="變慢">−</button>
+                  <output id="practice-rate" class="practice-rate">100%</output>
+                  <button id="practice-faster" class="btn small" type="button" aria-label="變快">+</button>
+                  <button id="practice-rate-reset" class="btn ghost small" type="button">恢復 100%</button>
+                </div>
+                <p class="hint">變速時音調會跟著改變。電腦試玩時：← / → 前後 5 秒，[ / ] 調整速度；VR 裡在暫停選單拖動時間軸。</p>
+              </div>
+            </div>
             <div class="play-row">
               <button id="play-vr" class="btn big vr" type="button" disabled>▶ 在 VR 中遊玩</button>
               <button id="play-desktop" class="btn big" type="button" disabled>▶ 電腦試玩</button>
@@ -353,6 +383,7 @@
               <li>VR 選單可直接搜尋下載 BeatSaver 譜面、調整設定、測量身高與校正音訊延遲。</li>
               <li><b>觀戰畫面</b>：用 PC VR 遊玩時，電腦螢幕會顯示第三人稱視角，按 V 或畫面上方按鈕切換。</li>
               <li><b>電腦試玩</b>：滑鼠揮動藍劍，按住左鍵改控制紅劍；A/D 左右閃避、S 蹲下；空白鍵暫停。</li>
+              <li><b>練習模式</b>：在「歌曲」頁打開，可以選從哪裡開始、調整速度（50%–200%，音調會跟著變）。不會失敗，也不記錄成績。VR 裡暫停後可以拖動時間軸換位置；電腦試玩時 ← / → 前後 5 秒，[ / ] 調整速度。</li>
             </ul>
           </div>
         </div>

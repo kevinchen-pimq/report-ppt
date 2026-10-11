@@ -9,6 +9,7 @@ export class GameAudio {
     this.startCtxTime = 0;
     this.startSongTime = 0;
     this.pausedAt = 0;
+    this.rate = 1; // playback speed (practice mode): the song clock runs at rate x real time
     this.offsetMs = 0; // extra audio latency (ms): positive = sound reaches the ears later
     this.volume = 0.8;
     this.sfxVolume = 0.5;
@@ -84,27 +85,73 @@ export class GameAudio {
     osc.stop(when + 0.08);
   }
 
-  /** Current song time in seconds, as heard by the player. */
+  /**
+   * Current song time in seconds, as heard by the player. At a playback rate r the buffer
+   * position scheduled at context time T is startSongTime + r (T - startCtxTime), and what is
+   * heard now was scheduled `latency` (real seconds) ago.
+   */
   get time() {
     if (!this.playing) return this.pausedAt;
-    return this.ctx.currentTime - this.startCtxTime + this.startSongTime - this.latency;
+    if (this.rate === 1) return this.ctx.currentTime - this.startCtxTime + this.startSongTime - this.latency;
+    return this.startSongTime + this.rate * (this.ctx.currentTime - this.startCtxTime - this.latency);
   }
 
-  play(fromSongTime) {
+  /** fade: short fade-in, and the previous source fades out (seeking without clicks). */
+  play(fromSongTime, fade = false) {
     const ctx = this.ensureContext();
-    this.stopSource();
+    this.stopSource(fade);
     const src = ctx.createBufferSource();
     src.buffer = this.buffer;
-    src.connect(this.master);
+    const r = this.rate;
+    src.playbackRate.value = r;
     // A small scheduling delay keeps the start sample-accurate
     const now = ctx.currentTime + 0.05;
-    const from = fromSongTime + this.latency;
-    if (from < 0) src.start(now - from, 0);
+    const from = fromSongTime + this.latency * r;
+    let out = src;
+    if (fade) {
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(1, now + 0.03);
+      src.connect(g);
+      out = g;
+      this.sourceGain = g;
+    }
+    out.connect(this.master);
+    if (from < 0) src.start(now - from / r, 0);
     else if (from < this.buffer.duration) src.start(now, from);
     this.source = src;
     this.startCtxTime = now;
     this.startSongTime = from;
     this.playing = true;
+  }
+
+  /** Playback speed (practice mode; pitch changes with it). Keeps the song position. */
+  setRate(r) {
+    if (r === this.rate) return;
+    if (!this.playing) {
+      this.rate = r;
+      return;
+    }
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    if (now < this.startCtxTime || this.startSongTime + this.rate * (now - this.startCtxTime) < 0) {
+      // not started yet (lead-in): schedule again at the new rate
+      const t = this.time;
+      this.rate = r;
+      this.play(t, true);
+      return;
+    }
+    // re-anchor the clock where the source is now and change its rate from here on
+    this.startSongTime += this.rate * (now - this.startCtxTime);
+    this.startCtxTime = now;
+    this.rate = r;
+    this.source.playbackRate.setValueAtTime(r, now);
+  }
+
+  /** Jumps to a song time: while playing the source restarts there with a short fade. */
+  seek(t) {
+    if (this.playing) this.play(t, true);
+    else this.pausedAt = t;
   }
 
   pause() {
@@ -186,15 +233,43 @@ export class GameAudio {
     }
   }
 
-  stopSource() {
+  stopSource(fade = false) {
+    const g = this.sourceGain;
+    this.sourceGain = null;
     if (this.source) {
+      const src = this.source;
+      this.source = null;
+      if (fade) {
+        // fade out over a few ms, then stop (no click)
+        const t = this.ctx.currentTime;
+        let out = g;
+        if (!out) {
+          out = this.ctx.createGain();
+          src.disconnect();
+          src.connect(out);
+          out.connect(this.master);
+        }
+        out.gain.cancelScheduledValues(t);
+        out.gain.setValueAtTime(out.gain.value, t);
+        out.gain.linearRampToValueAtTime(0, t + 0.025);
+        try {
+          src.stop(t + 0.03);
+        } catch (e) {
+          /* not started */
+        }
+        src.onended = () => {
+          src.disconnect();
+          out.disconnect();
+        };
+        return;
+      }
       try {
-        this.source.stop();
+        src.stop();
       } catch (e) {
         /* not started */
       }
-      this.source.disconnect();
-      this.source = null;
+      src.disconnect();
+      g?.disconnect();
     }
   }
 

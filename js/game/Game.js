@@ -12,6 +12,7 @@ import { FpsMeter } from './FpsMeter.js';
 import { Menu } from './Menu.js';
 import { Pointers } from './ui/Pointers.js';
 import { LatencyCalibrator } from './Calibration.js';
+import { Practice } from './Practice.js';
 import { settings, DEFAULTS } from '../settings.js';
 import { latestVersion } from '../beatsaver.js';
 import { parseModel, modelStore } from './Models.js';
@@ -70,6 +71,7 @@ export class Game {
     this.calibrator = new LatencyCalibrator(this.audio);
     this.hud = new Hud(this.scene);
     this.hud.setVisible(false);
+    this.practice = new Practice(this); // practice mode (Practice.js)
 
     this.sabers = [new Saber(COLOR_LEFT, 'left'), new Saber(COLOR_RIGHT, 'right')];
     for (const s of this.sabers) this.scene.add(s.object, s.trail);
@@ -488,6 +490,7 @@ export class Game {
     this.audio.pausedAt = this.startTime;
     this.endTime = Math.max(this.audio.duration, this.map.lastTime + 1) + 0.5;
     this.inWall = false;
+    this.practice.onPrepare(); // practice runs: speed, start position
   }
 
   beginPlay() {
@@ -510,6 +513,7 @@ export class Game {
     this.menu.hide();
     this.setPlayfieldVisible(true);
     this.state = 'playing';
+    this.practice.onResume(); // a position chosen on the practice timeline
     this.audio.resume();
   }
 
@@ -535,7 +539,8 @@ export class Game {
     r.title = this.meta.title;
     r.difficulty = this.meta.difficultyName;
     r.characteristic = this.meta.characteristic;
-    if (!failed && !this.settings.autoplay) r.best = this.recordBest(r);
+    if (this.practice.active) this.practice.adjustResults(r); // practice: never saved
+    else if (!failed && !this.settings.autoplay) r.best = this.recordBest(r);
     this.lastResults = r;
     this.showPanel('results');
   }
@@ -620,6 +625,7 @@ export class Game {
         this.xrInputs[i] = null;
       });
       ray.addEventListener('selectstart', () => this.onSelect(i));
+      ray.addEventListener('selectend', () => this.pointers.release(i)); // ends a slider drag
     }
   }
 
@@ -699,10 +705,12 @@ export class Game {
     }, { passive: true });
     window.addEventListener('pointerup', () => {
       this.mouseLeft = false;
+      this.pointers.release(2);
     });
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('keydown', (e) => {
       if (this.mode !== 'desktop' || this.state === 'idle') return;
+      if (this.practice.onKey(e)) return; // practice: ← / → jump, [ / ] speed
       const k = e.key.toLowerCase();
       if (k === ' ' || k === 'p') {
         e.preventDefault();
@@ -835,8 +843,8 @@ export class Game {
       const inWall = this.notes.headInWall(this.headPos);
       if (inWall) this.score.wall(dt);
       this.inWall = inWall;
-      this.env.update(t, dt);
-      if (this.score.failed && !this.settings.noFail) this.finish(true);
+      this.env.update(t, dt * this.audio.rate); // motion follows the song speed
+      if (this.score.failed && !this.settings.noFail && !this.practice.active) this.finish(true);
       else if (t >= this.endTime) this.finish(false);
     } else if (inGame) {
       this.env.update(this.state === 'ready' ? this.startTime : t, dt);
@@ -848,6 +856,7 @@ export class Game {
 
     if (inGame) this.hud.update(this.score, 0, Math.max(0, t), this.audio.duration, dt);
     if (this.calibrator.running) this.calibrator.schedule();
+    this.practice.update();
     this.menu.update(dt);
     this.effects.update(dt);
     this.renderer.render(this.scene, this.camera);

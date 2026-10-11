@@ -861,6 +861,90 @@ export class Environment {
     this.syncLasers();
     this.syncRings();
   }
+
+  // ---------------------------------------------------------------------------
+  // Seeking (practice mode)
+
+  /**
+   * Puts the lighting into its state at song time t (practice mode jumps). Generic: every
+   * lighting runtime of the run that has a seek(t) method is asked to seek, i.e. the runtimes
+   * on the shown module's record (this.active.lighting, or any other runtime stored there),
+   * the module itself (built.seek, optional), this.lighting if an environment-level runtime
+   * is added later, and our own scenery's Chroma runtime or group lighting.
+   */
+  seek(t) {
+    const mod = this.active;
+    if (mod) {
+      for (const k of Object.keys(mod)) {
+        const rt = mod[k];
+        if (rt && rt !== mod.built && rt !== mod.def && typeof rt.seek === 'function') rt.seek(t);
+      }
+      mod.built.seek?.(t);
+    } else if (this.chromaOn) {
+      this.chroma.seek(t);
+      this.syncLasers();
+      this.syncRings();
+    } else this.seekGroups(t);
+    this.lighting?.seek?.(t);
+  }
+
+  /** Group lighting (our scenery without Chroma) at time t: replays the events from the start. */
+  seekGroups(t) {
+    const events = this.events;
+    // the run's starting state (as reset())
+    this.boost = false;
+    this.ringSpinVel = 0;
+    this.ringZoomTarget = 1;
+    if (!events.some((e) => e.type <= 4)) this.setIdle();
+    else {
+      for (const g of this.groups) {
+        g.mode = 'off';
+        g.key = 'R';
+      }
+      this.groups[4].mode = 'on';
+      this.groups[4].key = 'R';
+      this.groups[4].brightness = 0.6;
+      this.laserSpeed = [0, 0];
+    }
+    let j = 0;
+    let last = null; // time the ring motion has been followed to
+    for (; j < events.length && events[j].time <= t; j++) {
+      const e = events[j];
+      if (e.type === 8 || e.type === 9) {
+        if (last !== null) this.advanceGroupRings(e.time - last);
+        last = e.time;
+      }
+      this.applyEvent(e, e.time);
+    }
+    this.eventIdx = j;
+    if (last !== null) this.advanceGroupRings(t - last);
+    // lights at once (no fade-in), same formula as update()
+    for (const g of this.groups) {
+      let k = 0;
+      const age = t - g.modeTime;
+      if (g.mode === 'on') k = 1;
+      else if (g.mode === 'flash') k = 1 + Math.max(0, 0.8 - age * 1.6);
+      else if (g.mode === 'fade') k = Math.max(0, 1.4 - age * 1.0);
+      g.intensity = k * g.brightness;
+      g.color.copy(this.palette(g.key)).multiplyScalar(g.intensity);
+      for (const m of g.materials) m.color.copy(g.color);
+    }
+    for (const r of this.rings) {
+      const i = r.userData.index;
+      r.rotation.z = this.ringSpin * (1 + i * 0.15);
+      r.position.z = -25 - i * 6 * this.ringZoom;
+    }
+    this.syncRings();
+  }
+
+  /** Ring spin (decaying) and zoom over `span` seconds, in closed form. */
+  advanceGroupRings(span) {
+    if (!(span > 0)) return;
+    const decay = Math.exp(-1.2 * span);
+    this.ringSpin += (this.ringSpinVel * (1 - decay)) / 1.2;
+    this.ringSpinVel *= decay;
+    this.ringZoom = this.ringZoomTarget + (this.ringZoom - this.ringZoomTarget) * Math.exp(-3 * span);
+  }
 }
 
 // ---------------------------------------------------------------------------

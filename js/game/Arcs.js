@@ -34,6 +34,25 @@ export class ArcManager {
     this.active = [];
     this.map = map;
     this.idx = 0;
+    this.from = -Infinity; // seek(): arcs ending before this are left out
+  }
+
+  /**
+   * Practice mode jump to song time t: clears the arcs on screen; arcs still running at `from`
+   * (>= t) that are already in view spawn now, later ones as usual (by their head time).
+   */
+  seek(t, from = t, halfJump = 0) {
+    for (const a of this.active) this.release(a);
+    this.active.length = 0;
+    if (!this.map) return;
+    const arcs = this.map.arcs;
+    const lead = halfJump + MOVE_TIME;
+    let k = 0;
+    for (; k < arcs.length && arcs[k].time - lead <= t; k++) {
+      if (arcs[k].endTime > from) this.active.push(this.acquire(arcs[k]));
+    }
+    this.idx = k;
+    this.from = from;
   }
 
   acquire(arc) {
@@ -91,7 +110,7 @@ export class ArcManager {
     const lead = halfJump + MOVE_TIME;
     while (this.idx < arcs.length && arcs[this.idx].time - lead <= t) {
       const a = arcs[this.idx++];
-      if (a.endTime < t - 0.5) continue;
+      if (a.endTime < t - 0.5 || a.endTime <= this.from) continue;
       this.active.push(this.acquire(a));
     }
     const jumpDist = njs * halfJump;

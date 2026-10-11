@@ -40,6 +40,7 @@ const LEGACY_RGB = 2000000000; // Chroma 1 colour events (see beatmap.js)
 const RING_TICK = 0.02; // ring rotation propagation runs at a fixed 50 Hz, like the game
 const DEG = Math.PI / 180;
 const LASER_DEG_PER_SPEED = 20; // degrees per second per unit of laser speed, like the game
+const SEEK_STRIDE = 256; // events between seek checkpoints (practice mode)
 
 /** Basic event types that are lights (5 boost, 8 / 9 rings, 12 / 13 laser speed are not). */
 export const LIGHT_TYPES = [0, 1, 2, 3, 4, 6, 7, 10, 11];
@@ -218,13 +219,18 @@ export class ChromaLighting {
    * those of them that start in the left colour; laserSpeed: lasers already spinning (idle).
    * chroma: false plays the basic events only (the events' Chroma data is ignored).
    */
-  reset(events, { counts = null, startOn = {}, startLeft = {}, laserSpeed = 0, chroma = true } = {}) {
+  reset(events, opts = {}) {
+    const { counts = null, startOn = {}, startLeft = {}, laserSpeed = 0, chroma = true } = opts;
+    this.resetArgs = [events, opts]; // seek() starts over from here
     this.events = chroma ? events || [] : basicEvents(events || []);
     this.eventIdx = 0;
     this.now = -Infinity;
     this.boost = false;
     this.ringTickAcc = 0;
-    this.prepare(counts);
+    // the event -> light tables only depend on the events and the ID mapping
+    if (this.preparedFor !== this.events || this.preparedCounts !== counts) this.prepare(counts);
+    this.preparedFor = this.events;
+    this.preparedCounts = counts;
     for (const type of this.types) {
       const grp = this.groups[type];
       grp.hasOver = false;
@@ -682,5 +688,196 @@ export class ChromaLighting {
         if (zoom) o.position.z = rs.baseZ - i * rs.spacing;
       }
     }
+  }
+  // ---------------------------------------------------------------------------
+  // Seeking (practice mode)
+
+  /**
+   * Puts everything into the state it has at song time t, as if the song had played up to t:
+   * starts over (reset() with the same arguments, without rebuilding the light tables) from the
+   * nearest checkpoint before t, replays the events from there (lights only take their state,
+   * nothing is drawn), fast-forwards the ring / laser motion between the motion events and sets
+   * the lights at once (no fade-in). Checkpoints (the whole state every SEEK_STRIDE events) are
+   * made by the first seek, so later seeks replay a few hundred events at most.
+   */
+  seek(t) {
+    if (!this.resetArgs) return;
+    this.reset(this.resetArgs[0], this.resetArgs[1]);
+    const events = this.events;
+    // checkpoints belong to one run (its events and reset options)
+    const fresh = this.checkpointsFor === events && this.checkpointsOpts === this.resetArgs[1];
+    if (events.length > SEEK_STRIDE && !fresh) this.buildCheckpoints();
+    let j = 0;
+    let motionT = null; // time the ring / laser motion has been simulated to
+    const cps = this.checkpointsFor === events && this.checkpointsOpts === this.resetArgs[1] ? this.checkpoints : null;
+    if (cps) {
+      let lo = 0;
+      let hi = cps.length - 1;
+      let best = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        if (cps[mid].last <= t) {
+          best = mid;
+          lo = mid + 1;
+        } else hi = mid - 1;
+      }
+      if (best >= 0) {
+        this.restoreCheckpoint(cps[best]);
+        j = cps[best].j;
+        motionT = cps[best].motionT;
+      }
+    }
+    motionT = this.replay(j, t, motionT);
+    this.now = t;
+    if (motionT !== null) this.fastForwardMotion(t - motionT);
+    // environment-specific events: handed over in order (their state is the environment's own)
+    if (this.onEvent) {
+      for (let k = 0; k < events.length && events[k].time <= t; k++) {
+        const e = events[k];
+        if (this.custom.has(e.type) && e.value < LEGACY_RGB) this.onEvent(e.type, e.value, e, e.time);
+      }
+    }
+    for (let ti = 0; ti < this.types.length; ti++) {
+      const grp = this.groups[this.types[ti]];
+      let gradActive = false;
+      if (grp.grad) {
+        const gr = grp.grad;
+        if (t >= gr.t1) this.endGradient(grp);
+        else {
+          const p = gr.ease(Math.max(0, Math.min(1, (t - gr.t0) / (gr.t1 - gr.t0))));
+          for (let c = 0; c < 4; c++) grp.gradCol[c] = gr.start[c] + (gr.end[c] - gr.start[c]) * p;
+          gradActive = true;
+        }
+      }
+      for (const L of grp.lights) {
+        L.dirty = true;
+        this.evalLight(L, grp, gradActive, t, 1);
+      }
+    }
+  }
+
+  /**
+   * Applies events from index j while their time is <= t (environment-specific ones are left
+   * to seek()); onCheckpoint(j, motionT) is called before every SEEK_STRIDE-th event. Returns
+   * the time the motion was simulated to.
+   */
+  replay(j, t, motionT, onCheckpoint = null) {
+    const events = this.events;
+    for (; j < events.length; j++) {
+      const e = events[j];
+      if (e.time > t) break;
+      if (onCheckpoint && j > 0 && j % SEEK_STRIDE === 0) onCheckpoint(j, motionT);
+      const type = e.type;
+      if (this.custom.has(type)) continue;
+      this.now = e.time;
+      if (type === 8 || type === 9 || type === 12 || type === 13) {
+        if (motionT !== null) this.fastForwardMotion(e.time - motionT);
+        motionT = e.time;
+      } else {
+        // a gradient that ended before this event ended in an earlier frame
+        const grp = this.groups[type];
+        if (grp && grp.grad && grp.grad.t1 < e.time) this.endGradient(grp);
+      }
+      this.applyEvent(e, j);
+    }
+    this.eventIdx = j;
+    return motionT;
+  }
+
+  /** One replay of the whole event list, keeping the state every SEEK_STRIDE events. */
+  buildCheckpoints() {
+    const events = this.events;
+    const cps = [];
+    this.replay(0, Infinity, null, (j, motionT) => {
+      const cp = this.saveCheckpoint();
+      cp.j = j;
+      cp.last = events[j - 1].time; // valid for seeks at or after this time
+      cp.motionT = motionT;
+      cps.push(cp);
+    });
+    this.checkpoints = cps;
+    this.checkpointsFor = events;
+    this.checkpointsOpts = this.resetArgs[1];
+    this.reset(this.resetArgs[0], this.resetArgs[1]);
+  }
+
+  saveCheckpoint() {
+    const lights = [];
+    const groups = [];
+    for (const type of this.types) {
+      const grp = this.groups[type];
+      groups.push([grp.over.slice(), grp.hasOver, grp.grad]);
+      for (const L of grp.lights) {
+        lights.push([L.mode, L.t0, L.k, L.key, L.explicit, L.r, L.g, L.b, L.ease, L.trT0, L.trT1, L.from.slice(), L.to.slice(), L.trEase, L.hsv]);
+      }
+    }
+    return {
+      lights,
+      groups,
+      boost: this.boost,
+      laserVel: this.laserVel.slice(),
+      phases: this.lasers.map((side) => side.map((o) => o.userData.phase)),
+      rings: this.ringSets.map((rs) => ({
+        rot: rs.rot.slice(), dest: rs.dest.slice(), rate: rs.rate.slice(),
+        effects: rs.effects.map((fx) => ({ ...fx })),
+        spacing: rs.spacing, spacingDest: rs.spacingDest, zoomRate: rs.zoomRate, zoomToggle: rs.zoomToggle,
+      })),
+      ringTickAcc: this.ringTickAcc,
+    };
+  }
+
+  restoreCheckpoint(cp) {
+    let li = 0;
+    this.types.forEach((type, gi) => {
+      const grp = this.groups[type];
+      const g = cp.groups[gi];
+      for (let c = 0; c < 4; c++) grp.over[c] = g[0][c];
+      grp.hasOver = g[1];
+      grp.grad = g[2];
+      for (const L of grp.lights) {
+        const s = cp.lights[li++];
+        [L.mode, L.t0, L.k, L.key, L.explicit, L.r, L.g, L.b, L.ease, L.trT0, L.trT1] = s;
+        for (let c = 0; c < 4; c++) {
+          L.from[c] = s[11][c];
+          L.to[c] = s[12][c];
+        }
+        L.trEase = s[13];
+        L.hsv = s[14];
+      }
+    });
+    this.boost = cp.boost;
+    this.laserVel[0] = cp.laserVel[0];
+    this.laserVel[1] = cp.laserVel[1];
+    this.lasers.forEach((side, k) => side.forEach((o, i) => this.setLaserPhase(o, cp.phases[k][i])));
+    this.ringSets.forEach((rs, k) => {
+      const r = cp.rings[k];
+      rs.rot.set(r.rot);
+      rs.dest.set(r.dest);
+      rs.rate.set(r.rate);
+      rs.pool.push(...rs.effects);
+      rs.effects.length = 0;
+      for (const fx of r.effects) rs.effects.push({ ...fx });
+      rs.spacing = r.spacing;
+      rs.spacingDest = r.spacingDest;
+      rs.zoomRate = r.zoomRate;
+      rs.zoomToggle = r.zoomToggle;
+    });
+    this.ringTickAcc = cp.ringTickAcc;
+  }
+
+  ringsBusy() {
+    for (const rs of this.ringSets) if (rs.effects.length) return true;
+    return false;
+  }
+
+  /** Ring / laser motion over `span` seconds: ring steps tick by tick while they spread, then one step. */
+  fastForwardMotion(span) {
+    if (!(span > 0)) return;
+    let left = span;
+    while (left > RING_TICK && this.ringsBusy()) {
+      this.updateMotion(RING_TICK);
+      left -= RING_TICK;
+    }
+    if (left > 0) this.updateMotion(left);
   }
 }

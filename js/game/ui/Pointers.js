@@ -6,6 +6,10 @@ const _ray = new THREE.Raycaster();
 const _quat = new THREE.Quaternion();
 const _meshes = [];
 const _hits = [];
+const _plane = new THREE.Plane();
+const _normal = new THREE.Vector3();
+const _point = new THREE.Vector3();
+const _pos = new THREE.Vector3();
 
 /**
  * Laser pointers for UI panels: one per XR controller (target-ray space),
@@ -18,6 +22,8 @@ export class Pointers {
     this.cursors = [];
     this.hits = [null, null, null]; // 0,1 = controllers, 2 = mouse
     this.lastScroll = [0, 0];
+    // widget drags in progress per pointer: { panel, id, uv } while the trigger / button is held
+    this.drags = [null, null, null];
     const laserGeo = new THREE.CylinderGeometry(0.003, 0.003, 1, 6, 1, true);
     laserGeo.rotateX(-Math.PI / 2);
     laserGeo.translate(0, 0, -0.5);
@@ -80,6 +86,7 @@ export class Pointers {
       _origin.setFromMatrixPosition(ctrl.matrixWorld);
       _dir.set(0, 0, -1).transformDirection(ctrl.matrixWorld);
       _ray.set(_origin, _dir);
+      this.updateDrag(i);
       const hit = this.pick(panels);
       laser.visible = true;
       if (hit) {
@@ -110,6 +117,7 @@ export class Pointers {
   /** Desktop mouse (NDC coordinates). */
   updateMouse(panels, ndc, camera) {
     _ray.setFromCamera(ndc, camera);
+    this.updateDrag(2);
     const hit = this.pick(panels);
     if (hit) {
       for (const p of panels) if (p !== hit.panel) p.setHover(2, null);
@@ -119,11 +127,47 @@ export class Pointers {
     return !!hit;
   }
 
-  /** Click with pointer i; returns true if a widget handled it. */
+  /** Click with pointer i; returns true if a widget handled it. A draggable widget starts a drag. */
   click(i) {
     const hit = this.hits[i];
     if (!hit) return false;
+    const area = hit.panel.dragAt(hit.uv);
+    if (area) {
+      this.drags[i] = { panel: hit.panel, id: area.id, uv: hit.uv.clone() };
+      hit.panel.drag(area.id, hit.uv);
+      return true;
+    }
     return hit.panel.click(hit.uv);
+  }
+
+  /** Trigger / mouse button released: ends pointer i's drag. */
+  release(i) {
+    const d = this.drags[i];
+    if (!d) return;
+    this.drags[i] = null;
+    d.panel.drag(d.id, d.uv, true);
+  }
+
+  /** While dragging: follows the current ray (_ray) on the dragged panel's plane, also off its edges. */
+  updateDrag(i) {
+    const d = this.drags[i];
+    if (!d) return;
+    const mesh = d.panel.mesh;
+    if (!mesh.visible) {
+      this.drags[i] = null;
+      return;
+    }
+    mesh.updateMatrixWorld();
+    _normal.set(0, 0, 1).transformDirection(mesh.matrixWorld);
+    _plane.setFromNormalAndCoplanarPoint(_normal, _pos.setFromMatrixPosition(mesh.matrixWorld));
+    if (!_ray.ray.intersectPlane(_plane, _point)) return;
+    mesh.worldToLocal(_point);
+    const p = d.panel;
+    const u = _point.x / (p.width / p.ppm) + 0.5;
+    const v = _point.y / (p.height / p.ppm) + 0.5;
+    if (Math.abs(u - d.uv.x) < 1e-5 && Math.abs(v - d.uv.y) < 1e-5) return;
+    d.uv.set(u, v);
+    p.drag(d.id, d.uv);
   }
 
   /** Mouse wheel / thumbstick scrolling for pointer i. */

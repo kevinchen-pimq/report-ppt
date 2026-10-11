@@ -264,6 +264,7 @@ export class NoteManager {
     this.map = map;
     this.noteIdx = 0;
     this.wallIdx = 0;
+    this.wallFrom = -Infinity; // seek(): walls ending before this are left out
     if (map && this.chroma) {
       // create every colour's materials now, not mid-song
       for (const n of map.notes) if (n.chroma != null && n.kind !== 'bomb') this.slotFor(n.chroma);
@@ -275,6 +276,40 @@ export class NoteManager {
       this.jumpDist = this.njs * map.halfJump; // half jump distance
       this.spawnLead = map.halfJump + MOVE_TIME;
     }
+  }
+
+  /**
+   * Practice mode jump to song time t: clears what is on screen and moves the spawn pointers
+   * (binary search). Objects before `from` (>= t) are left out, nothing skipped is scored:
+   * notes from `from` on, walls still running at `from` (spawned now when already in view).
+   */
+  seek(t, from = t) {
+    for (const o of this.active) this.release(o);
+    for (const w of this.activeWalls) this.releaseWall(w);
+    this.active.length = 0;
+    this.activeWalls.length = 0;
+    const map = this.map;
+    if (!map) return;
+    this.njs = map.njsAt(t);
+    this.jumpDist = this.njs * this.halfJump;
+    const notes = map.notes;
+    let lo = 0;
+    let hi = notes.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (notes[mid].time < from) lo = mid + 1;
+      else hi = mid;
+    }
+    this.noteIdx = lo;
+    const walls = map.walls;
+    let k = 0;
+    for (; k < walls.length && walls[k].time - this.spawnLead <= t; k++) {
+      const w = walls[k];
+      if (w.endTime >= from && this.showWalls) this.activeWalls.push(this.acquireWall(w));
+    }
+    this.wallIdx = k;
+    // later walls that start before `from` (lead-in) but run past it still spawn normally
+    this.wallFrom = from;
   }
 
   // ----- object pools -------------------------------------------------------
@@ -421,7 +456,7 @@ export class NoteManager {
     const walls = this.map.walls;
     while (this.wallIdx < walls.length && walls[this.wallIdx].time - this.spawnLead <= t) {
       const w = walls[this.wallIdx++];
-      if (w.endTime < t || !this.showWalls) continue;
+      if (w.endTime < t || w.endTime < this.wallFrom || !this.showWalls) continue;
       this.activeWalls.push(this.acquireWall(w));
     }
 
