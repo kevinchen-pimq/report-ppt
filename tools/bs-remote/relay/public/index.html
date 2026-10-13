@@ -23,24 +23,34 @@
 <body>
 <main>
   <h1>BS Remote</h1>
-  <p class="sub">讓 Claude 遠端操控電腦上的 Beat Saber：移動 Camera2 鏡頭、跳到指定秒數、凍結畫面、截圖或錄影，用來比對網頁版場景燈光。</p>
+  <p class="sub">讓 Claude 遠端操控電腦上的 Beat Saber 截圖：用虛擬手把移動 LIV 鏡頭、在指定秒數截圖或錄影，用來比對網頁版場景燈光。</p>
 
   <section>
-    <h2>1. 先裝好這三樣（只要一次）</h2>
+    <h2>1. 先裝好這些（只要一次）</h2>
     <p>用 PowerShell 執行：</p>
     <pre><code>winget install Python.Python.3.12
-winget install Microsoft.DotNet.SDK.8
 winget install Gyan.FFmpeg</code></pre>
+    <p>裝完<b>關掉 PowerShell 再開一個新的</b>，然後：</p>
+    <pre><code>pip install vgamepad</code></pre>
     <ul>
       <li>Python：跑接收指令的小程式</li>
-      <li>.NET SDK：在你電腦上編譯 BSRemote mod（遊戲檔案只能在你電腦上編譯）</li>
-      <li>FFmpeg：錄影用，只截圖可以不裝</li>
+      <li>FFmpeg：截圖和錄影</li>
+      <li>vgamepad：虛擬 Xbox 手把，用來操控 LIV 的鏡頭（安裝時會一併裝 ViGEmBus 驅動，若跳出安裝視窗請按同意）</li>
+      <li>選用：用 ModAssistant 裝 <b>DataPuller</b>，可以讀到歌曲目前秒數，就能在指定秒數自動截圖</li>
     </ul>
-    <p class="note">裝完請關掉 PowerShell 再開一個新的，讓新指令生效。</p>
   </section>
 
   <section>
-    <h2>2. 下載並啟動接收程式</h2>
+    <h2>2. LIV 設定</h2>
+    <ul>
+      <li>開 LIV，在 Beat Saber 裡讓 LIV 鏡頭出現（跟平常錄 LIV 一樣）</li>
+      <li>LIV Avatar 介面的 <b>Camera</b> 分頁，把鏡頭模式切到 <b>Gamepad</b></li>
+      <li>LIV 的輸出視窗保持開著、不要縮到最小（截圖抓的是那個視窗）</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>3. 下載並啟動接收程式</h2>
     <pre><code>mkdir C:\bsr; cd C:\bsr
 iwr https://bs-remote.pages.dev/bsr_agent.py -OutFile bsr_agent.py
 python bsr_agent.py --token 你的TOKEN</code></pre>
@@ -52,13 +62,13 @@ python bsr_agent.py --token 你的TOKEN</code></pre>
   </section>
 
   <section>
-    <h2>3. 接下來都由 Claude 遠端完成</h2>
+    <h2>4. 接下來由 Claude 遠端操作</h2>
     <ul>
-      <li>編譯並安裝 BSRemote mod（遊戲要先關掉）</li>
-      <li>建立一個叫 Remote 的 Camera2 鏡頭（全畫面、隱藏方塊和介面）</li>
-      <li>用桌面模式（fpfc，不需要頭盔）開遊戲、下載譜面、跳到指定秒數截圖</li>
+      <li>用虛擬手把移動 LIV 鏡頭，截圖確認位置</li>
+      <li>你開歌（或播放回放）後，在指定秒數自動截圖，或錄一段影片</li>
+      <li>下載要對照的譜面到 CustomLevels</li>
     </ul>
-    <p class="note">它只會做固定的幾種動作：開關遊戲、下載譜面到 CustomLevels、寫 Camera2 鏡頭設定、編譯安裝 BSRemote mod、錄影、讀遊戲記錄檔。要停止時在視窗按 Ctrl+C。</p>
+    <p class="note">它只會做固定的幾種動作：截圖／錄影視窗、操作虛擬手把、讀 DataPuller 的歌曲秒數、開關遊戲、下載譜面到 CustomLevels、讀遊戲記錄檔。不會安裝或修改任何 mod。要停止時在視窗按 Ctrl+C。</p>
   </section>
 </main>
 </body>

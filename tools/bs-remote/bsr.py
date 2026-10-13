@@ -3,13 +3,11 @@
 
   BSR_TOKEN=… python3 bsr.py status
   python3 bsr.py run ping
-  python3 bsr.py run mod '{"method":"GET","path":"/state"}'
-  python3 bsr.py blob bsremote-src.zip mod.zip        (upload a file the agent can fetch)
-  python3 bsr.py shoot --hash 2CC66… --diff ExpertPlus --times 14,43,52 --out shots/ \
-      --pose '0,1.7,0 0,0,0 70'  --pose '0,4,-3 15,0,0 80'
-
-Poses are "x,y,z rx,ry,rz fov" in Beat Saber (Unity) coordinates: x right, y up, z forward,
-Euler degrees. The player stands at the origin, eyes about 1.7 m up.
+  python3 bsr.py run windows
+  python3 bsr.py run screenshot '{"title":"LIV Output"}' --out shots/
+  python3 bsr.py run pad '{"steps":[{"ly":0.5,"ms":400}],"shot_title":"LIV Output"}' --out shots/
+  python3 bsr.py run shoot_at '{"times":[14,43,52],"title":"LIV Output"}' --out shots/
+  python3 bsr.py blob bsr_agent.py agent/bsr_agent.py   (then: run agent_update)
 """
 import argparse
 import json
@@ -83,50 +81,6 @@ def run(cmd_type, args=None, out=None, timeout=600, quiet=False):
     return res
 
 
-def parse_pose(s):
-    parts = s.split()
-    pos = [float(v) for v in parts[0].split(',')]
-    rot = [float(v) for v in parts[1].split(',')] if len(parts) > 1 else [0, 0, 0]
-    pose = {'pos': pos, 'rot': rot}
-    if len(parts) > 2:
-        pose['fov'] = float(parts[2])
-    return pose
-
-
-def shoot(a):
-    """For each song time: (re)start the level a few seconds before it, freeze there, capture every pose."""
-    poses = [parse_pose(p) for p in a.pose] or [{'pos': [0, 1.7, 0], 'rot': [0, 0, 0], 'fov': 70}]
-    hide = {k: True for k in ('notes', 'walls', 'ui', 'debris', 'particles', 'avatar', 'sabers')} if not a.show_objects else None
-    times = sorted(float(t) for t in a.times.split(','))
-    current = None  # song time we are frozen at (None: not in a level)
-    index = []
-    for t in times:
-        if current is None or t < current + 0.05 or t - current > a.max_gap:
-            play = {'hash': a.hash, 'characteristic': a.characteristic, 'difficulty': a.diff, 'start': max(0.0, t - a.lead), 'speed': 1, 'noFail': True}
-            if a.environment:
-                play['environment'] = a.environment
-            r = run('mod', {'path': '/play', 'args': play, 'timeout': 120}, quiet=True)
-            if not r.get('ok'):
-                print('play failed:', r)
-                return
-        else:
-            run('mod', {'path': '/resume'}, quiet=True)
-        args = {'at': t, 'cam': a.cam, 'poses': poses, 'superSize': a.supersize, 'timeout': a.max_gap + a.lead + 30}
-        if hide:
-            args['hide'] = hide
-        r = run('mod', {'path': '/shots', 'args': args, 'timeout': 240}, out=a.out, quiet=True)
-        if not r.get('ok'):
-            print('shots failed:', r)
-            return
-        current = r.get('songTime', t)
-        for i, p in enumerate(r['saved']):
-            index.append({'time': t, 'songTime': current, 'pose': poses[i] if i < len(poses) else None, 'file': p})
-            print(f'{t:7.2f}s pose {i}: {p}')
-    with open(os.path.join(a.out, 'index.json'), 'w') as f:
-        json.dump(index, f, indent=1)
-    run('mod', {'path': '/resume'}, quiet=True)
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest='cmd', required=True)
@@ -139,20 +93,7 @@ def main():
     b = sub.add_parser('blob')
     b.add_argument('name')
     b.add_argument('file')
-    s = sub.add_parser('shoot')
-    s.add_argument('--hash', required=True)
-    s.add_argument('--diff', default='ExpertPlus')
-    s.add_argument('--characteristic', default='Standard')
-    s.add_argument('--environment')
-    s.add_argument('--times', required=True, help='song seconds, comma separated')
-    s.add_argument('--pose', action='append', default=[], help='"x,y,z rx,ry,rz fov"')
-    s.add_argument('--cam', default='Remote')
-    s.add_argument('--lead', type=float, default=6, help='start this many seconds before a time')
-    s.add_argument('--max-gap', type=float, default=20, help='resume instead of restarting when the next time is this close')
-    s.add_argument('--supersize', type=int, default=1)
-    s.add_argument('--show-objects', action='store_true', help='keep notes / walls / HUD visible')
-    s.add_argument('--out', default='bsr-shots')
-    q = sub.add_parser('clear')
+    sub.add_parser('clear')
     a = ap.parse_args()
     if a.cmd == 'status':
         print(req('GET', '/status')[1].decode())
@@ -160,8 +101,6 @@ def main():
         run(a.type, json.loads(a.args), out=a.out, timeout=a.timeout)
     elif a.cmd == 'blob':
         print(req('PUT', f'/blob/{a.name}', open(a.file, 'rb').read(), ctype='application/octet-stream', timeout=300))
-    elif a.cmd == 'shoot':
-        shoot(a)
     elif a.cmd == 'clear':
         print(req('DELETE', '/queue')[1].decode())
 
