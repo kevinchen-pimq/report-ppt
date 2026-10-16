@@ -14,7 +14,7 @@ Drive 資料夾                      網址
     └── first-post.html →  …/exec/blog/first-post.html
 ```
 
-`example-site/` 是一個可以直接上傳測試的範例網站。
+`example-site/` 是範例網站的原始碼，用 `npm run build` 打包後上傳 `dist/`。
 
 ## 為什麼要改寫 HTML？
 
@@ -27,7 +27,8 @@ Apps Script 的網頁一律放在 `*.googleusercontent.com` 的沙盒 iframe 裡
 | --- | --- |
 | `<link rel="stylesheet" href="css/a.css">` | 內嵌成 `<style>`（CSS 裡的 `url()`、`@import` 也會處理） |
 | `<script src="js/a.js">` | 內嵌成 `<script>`；`defer` 的會移到 `</body>` 前保持執行順序 |
-| `<img src>`、`srcset`、`<video poster>`、`<link rel="icon">`、字型 | 轉成 `data:` URI |
+| `<img src>`、`srcset`、CSS 背景圖（png / jpeg / webp） | 公開分享的檔案用 Drive 縮圖網址，否則轉成 `data:` URI（見下方「圖片」） |
+| SVG、GIF、`<video poster>`、`<link rel="icon">`、字型 | 轉成 `data:` URI |
 | `<a href="about.html">`、`<form action>`、`<iframe src>` | 改成 Web App 絕對網址，並跳出 iframe |
 | `<a href="#section">` | 保持在同一頁 |
 | `http://`、`//cdn…`、`mailto:` 等外部連結 | 不變 |
@@ -36,7 +37,9 @@ Apps Script 的網頁一律放在 `*.googleusercontent.com` 的沙盒 iframe 裡
 
 ## 安裝
 
-1. **準備網站資料夾**：在 Google Drive 建立資料夾，把網站檔案（例如 `example-site/` 的內容）上傳進去，保持目錄結構。
+1. **準備網站資料夾**：先 `npm install && npm run build` 打包（見下方「用 esbuild 打包」），
+   在 Google Drive 建立資料夾，把 `dist/` 的內容上傳進去，保持目錄結構。
+   想讓圖片走 Drive 縮圖網址，就把這個資料夾設成「知道連結的任何人都能檢視」。
    網址列 `https://drive.google.com/drive/folders/<這一段>` 就是資料夾 ID。
 2. **建立 Apps Script 專案**：開啟 <https://script.new>。
 3. **貼上程式**：把 `Code.gs` 的內容貼到編輯器的 `Code.gs`。
@@ -62,6 +65,54 @@ clasp push   # 會上傳 Code.gs 與 appsscript.json
 ```
 
 目錄裡的 `.claspignore` 只放行 `Code.gs` 與 `appsscript.json`，`example-site/` 不會被推上去。
+
+## 圖片：Drive 縮圖網址 vs data URI
+
+把圖片轉成 data URI 會讓 HTML 變很大（base64 多 33%），也無法被瀏覽器分開快取。
+所以 `IMAGE_MODE: 'auto'`（預設）會檢查每張圖片的分享設定：
+
+- **知道連結的任何人可檢視** → `https://drive.google.com/thumbnail?id=<ID>&sz=w2000`
+- **未公開** → `data:image/...;base64,...`
+
+| 網址 | 可以放在 `<img>` 嗎？ |
+| --- | --- |
+| `drive.google.com/thumbnail?id=…&sz=w2000` | ✅ 可以（轉址到 `lh3.googleusercontent.com`，有 `Access-Control-Allow-Origin: *`） |
+| `lh3.googleusercontent.com/d/<ID>=w2000` | ✅ 可以 |
+| `drive.google.com/uc?id=…`、`uc?export=view&id=…` | ❌ 不行。轉址後回應帶 `Cross-Origin-Resource-Policy: same-site`，Chrome 會以 `ERR_BLOCKED_BY_ORB` 擋下。只能當下載連結用 |
+
+（以上用 Chromium 從 `*.script.googleusercontent.com` 網域實測。）
+
+注意事項：
+
+- `sz=w2000` 是最大寬度，原圖較小時不會放大；可以用 `THUMBNAIL_SIZE` 調整。
+- 縮圖會重新編碼，GIF 動畫會消失，所以 GIF 與 SVG 一律內嵌。
+- 公開分享代表知道檔案 ID 的人都能下載原圖；ID 是隨機的，但不適合放機密圖片。
+- 想全部內嵌（不公開分享任何檔案）就設 `IMAGE_MODE: 'inline'`；確定都公開了可以設 `'drive'`，省下每張圖檢查分享設定的時間。
+
+## 用 esbuild 打包
+
+Apps Script 頁面在沙盒 iframe 裡，`import './util.js'` 這種相對路徑的模組載入會失敗，
+所以 JS 要先打包成單一檔案。`build.mjs` 會：
+
+- 掃描所有 HTML 的本地 `<script src>` 和 `<link rel="stylesheet">`，當成 esbuild 的進入點
+- `type="module"` 打包成 ESM，一般 script 打包成 IIFE，並且 minify
+- 支援 **TypeScript / JSX**（`<script src="app.ts">` 會輸出 `app.js`，HTML 路徑一起改）與 **npm 套件**（`import dayjs from 'dayjs'`）
+- CSS 的 `@import` 合併成一個檔，`url()` 的圖片 / 字型保留在原路徑，交給 Apps Script 處理
+- 已被打包進去的模組不會複製到 `dist/`；HTML、圖片、JSON 等原樣複製
+
+```bash
+cd drive-static-site
+npm install
+npm run build                                   # example-site → dist
+node build.mjs my-site dist                     # 打包自己的網站
+node build.mjs my-site dist --dev               # 不 minify、含 inline sourcemap
+node build.mjs my-site "$HOME/Google Drive/我的雲端硬碟/site" --watch
+```
+
+最後一行把輸出直接指到「Google 雲端硬碟電腦版」的同步資料夾，存檔 → 自動打包 → 自動上傳，
+再執行 `purgeCache()`（或等快取過期）就上線了。
+
+用 Vite / Astro 等工具產生的 `dist/` 也可以直接上傳；只要確認 JS 是打包好的單一檔案、沒有動態 `import()` 分割出來的 chunk。
 
 ## 更新內容
 
@@ -104,6 +155,7 @@ const data = await fetch(siteUrl('data/posts.json')).then((r) => r.json());
 - **SEO**：內容在 iframe 內，搜尋引擎幾乎無法索引。適合內部文件、作品集、報告分享，不適合需要曝光的網站。
 - **效能**：第一次載入要讀 Drive（每個檔案約數十～數百毫秒），之後走快取。頁面內嵌了所有資源，圖片多的頁面會很大；大圖請壓縮或放外部 CDN。
 - **配額**：Apps Script Web App 有每日執行次數與同時執行數上限（一般帳號約 30 個同時請求），不適合高流量。
-- **HTML 解析**用正規表示式，一般手寫或靜態產生器（Hugo、Jekyll、Vite build）輸出都沒問題；動態組出來的路徑（例如 JS 裡 `img.src = 'a.png'`）不會被改寫，請改用 `siteUrl()` 或 data URI。
+- **HTML 解析**用正規表示式，一般手寫或靜態產生器（Hugo、Jekyll、Vite build）輸出都沒問題；動態組出來的路徑（例如 JS 裡 `img.src = 'a.png'`）不會被改寫，請在 JS 裡 `import logo from './a.png'`（esbuild 會轉成 data URI）或改用 Drive 縮圖網址。
+- **ES module 的相對 import** 不打包就無法運作，請用 `build.mjs`。
 - 同一資料夾有同名檔案時取第一個；路徑大小寫有區分。
 - SPA 的 History API 路由不適用（網址在 iframe 外層）；請用 hash 路由（`#/page`）。

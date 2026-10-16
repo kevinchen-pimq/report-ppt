@@ -23,7 +23,16 @@ const CONFIG = {
   NOT_FOUND_PAGE: '404.html',
   // 快取秒數（最長 21600 = 6 小時），0 代表不快取
   CACHE_SECONDS: 600,
-  // 超過這個大小的圖片 / 檔案不轉 data URI，改用 Drive 連結（檔案需設為「知道連結的人可檢視」）
+  // 圖片（png / jpeg / webp / bmp）的載入方式：
+  //   'auto'   檔案有公開分享（知道連結的人可檢視）就用 Drive 縮圖網址，否則內嵌成 data URI
+  //   'drive'  一律用 Drive 縮圖網址（檔案或所在資料夾必須公開分享，否則圖片會破圖）
+  //   'inline' 一律內嵌成 data URI
+  // 注意：drive.google.com/uc?id=… 不能用在 <img>，瀏覽器會以 ERR_BLOCKED_BY_ORB 擋下；縮圖網址則可以。
+  // SVG、GIF（縮圖會失去動畫）、字型等其他檔案一律內嵌。
+  IMAGE_MODE: 'auto',
+  // 縮圖最大寬度（w2000 = 寬 2000px；原圖較小時不會放大）
+  THUMBNAIL_SIZE: 'w2000',
+  // 超過這個大小的檔案不轉 data URI：圖片改用縮圖網址，其他檔案改用 Drive 下載連結（都需要公開分享）
   MAX_INLINE_BYTES: 5 * 1024 * 1024,
   // 資料夾沒有首頁時，是否列出檔案清單
   AUTO_INDEX: false,
@@ -78,6 +87,9 @@ function purgeCache() {
 function checkSetup() {
   const root = getRootFolder_();
   console.log('根目錄：' + root.getName() + ' (' + root.getId() + ')');
+  console.log('圖片模式：' + CONFIG.IMAGE_MODE + '，根目錄' +
+    (isPublic_(root) ? '已公開分享，圖片會使用 Drive 縮圖網址' : '未公開分享，' +
+      (CONFIG.IMAGE_MODE === 'drive' ? '警告：drive 模式下圖片會破圖' : '圖片會內嵌成 data URI')));
   const node = resolvePath_('');
   const index = CONFIG.INDEX_FILES.map((n) => findChild_(node.folder, n, 'file')).find(Boolean);
   console.log(index ? '首頁：' + index.getName() : '警告：根目錄沒有 ' + CONFIG.INDEX_FILES.join(' / '));
@@ -380,10 +392,34 @@ function assetUri_(ref, ctx, depth) {
 }
 
 function fileUri_(file, mime) {
+  const isThumbnailable = THUMBNAIL_MIME_RE_.test(mime);
+  if (isThumbnailable && CONFIG.IMAGE_MODE !== 'inline' && (CONFIG.IMAGE_MODE === 'drive' || isPublic_(file))) {
+    return thumbnailUrl_(file);
+  }
   if (file.getSize() > CONFIG.MAX_INLINE_BYTES) {
-    return 'https://drive.google.com/uc?export=view&id=' + encodeURIComponent(file.getId());
+    // uc 連結只適合當下載連結；被 <video>/<script> 等內嵌載入時可能會被瀏覽器擋下
+    return isThumbnailable
+      ? thumbnailUrl_(file)
+      : 'https://drive.google.com/uc?export=download&id=' + encodeURIComponent(file.getId());
   }
   return 'data:' + mime + ';base64,' + Utilities.base64Encode(file.getBlob().getBytes());
+}
+
+const THUMBNAIL_MIME_RE_ = /^image\/(png|jpeg|webp|bmp)$/;
+
+function thumbnailUrl_(file) {
+  return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.getId()) +
+    '&sz=' + encodeURIComponent(CONFIG.THUMBNAIL_SIZE);
+}
+
+/** 匿名訪客能不能看到這個檔案（縮圖網址需要）。 */
+function isPublic_(item) {
+  try {
+    const access = item.getSharingAccess();
+    return access === DriveApp.Access.ANYONE || access === DriveApp.Access.ANYONE_WITH_LINK;
+  } catch (err) {
+    return false;
+  }
 }
 
 function extractTitle_(html) {

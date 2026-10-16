@@ -1,0 +1,12 @@
+{
+  "name": "drive-static-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs example-site dist",
+    "watch": "node build.mjs example-site dist --watch"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.10"
+  }
+}
