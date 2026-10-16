@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "dayjs": "https://esm.sh/dayjs@1.11.13"
+  }
+}

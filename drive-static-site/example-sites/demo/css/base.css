@@ -1,0 +1,3 @@
+:root { --accent: #1a73e8; --bg: #ffffff; --fg: #202124; }
+@media (prefers-color-scheme: dark) { :root { --accent: #8ab4f8; --bg: #1e1e1e; --fg: #e8eaed; } }
+* { box-sizing: border-box; }

@@ -1,46 +1,68 @@
 /**
- * Drive Static Site
- * 把一個 Google Drive 資料夾當成靜態網站，用 Apps Script Web App 對外提供。
+ * Drive Static Sites
+ * 一個 Apps Script Web App，把 Google Drive 上的多個資料夾當成多個靜態網站。
  *
- *   https://script.google.com/macros/s/<部署ID>/exec              → /index.html
- *   https://script.google.com/macros/s/<部署ID>/exec/about.html   → /about.html
- *   https://script.google.com/macros/s/<部署ID>/exec/blog/        → /blog/index.html
+ *   SITES_FOLDER/                  https://script.google.com/macros/s/<部署ID>/exec
+ *   ├── blog/       ──────────→    …/exec/blog/            → blog/index.html
+ *   │   ├── index.html             …/exec/blog/about.html  → blog/about.html
+ *   │   ├── site.json   （選用）每個網站自己的設定
+ *   │   └── _build.json （自動產生）esbuild 打包結果
+ *   └── docs/       ──────────→    …/exec/docs/
  *
  * Apps Script 的 HtmlService 會把頁面放進 googleusercontent.com 的沙盒 iframe，
- * 所以瀏覽器無法再用相對路徑去抓 CSS / JS / 圖片。這支程式在伺服器端把 HTML 改寫：
- *   - <link rel="stylesheet"> 與 <script src> 直接內嵌
- *   - 圖片、字型、CSS 裡的 url() 轉成 data URI
- *   - <a href> 等頁面連結改成指向 Web App 的絕對網址（並跳出 iframe）
- * 改寫結果會壓縮後放進 CacheService，修改 Drive 內容後執行 purgeCache() 立即生效。
+ * 瀏覽器無法再用相對路徑載入 CSS / JS / 圖片，所以伺服器端會改寫 HTML：
+ *   - <script src> / <link rel="stylesheet"> 內嵌（有 esbuild 打包結果就用打包後的版本，見 Build.gs）
+ *   - 公開分享的圖片改用 Drive 縮圖網址，其餘檔案轉成 data URI
+ *   - <a href> 等頁面連結改成 Web App 的絕對網址（並跳出 iframe）
+ * 改寫結果壓縮後放進 CacheService；Build.gs 的 buildChanged() 偵測到檔案變更會自動讓快取失效。
  */
 
 const CONFIG = {
-  // 網站根目錄的 Drive 資料夾 ID。也可以在「專案設定 → 指令碼屬性」設定 ROOT_FOLDER_ID（優先）。
-  ROOT_FOLDER_ID: '',
-  // 請求資料夾時依序尋找的首頁檔名
-  INDEX_FILES: ['index.html', 'index.htm'],
-  // 找不到檔案時顯示的頁面（放在根目錄），不存在就用內建的 404 頁
-  NOT_FOUND_PAGE: '404.html',
+  // 放網站的 Drive 資料夾 ID，每個子資料夾就是一個網站（子資料夾名稱 = 網址第一段）。
+  // 也可以在「專案設定 → 指令碼屬性」設定 SITES_FOLDER_ID（優先）。
+  SITES_FOLDER_ID: '',
+  // 不在 SITES_FOLDER 裡的網站：指令碼屬性 SITES = {"名稱": "資料夾ID", ...}
+  // /exec 直接顯示這個網站的首頁；留空則顯示網站列表
+  DEFAULT_SITE: '',
+  // 沒有 DEFAULT_SITE 時，/exec 是否列出所有網站
+  LIST_SITES: true,
   // 快取秒數（最長 21600 = 6 小時），0 代表不快取
   CACHE_SECONDS: 600,
-  // 圖片（png / jpeg / webp / bmp）的載入方式：
-  //   'auto'   檔案有公開分享（知道連結的人可檢視）就用 Drive 縮圖網址，否則內嵌成 data URI
-  //   'drive'  一律用 Drive 縮圖網址（檔案或所在資料夾必須公開分享，否則圖片會破圖）
-  //   'inline' 一律內嵌成 data URI
-  // 注意：drive.google.com/uc?id=… 不能用在 <img>，瀏覽器會以 ERR_BLOCKED_BY_ORB 擋下；縮圖網址則可以。
-  // SVG、GIF（縮圖會失去動畫）、字型等其他檔案一律內嵌。
-  IMAGE_MODE: 'auto',
-  // 縮圖最大寬度（w2000 = 寬 2000px；原圖較小時不會放大）
-  THUMBNAIL_SIZE: 'w2000',
-  // 超過這個大小的檔案不轉 data URI：圖片改用縮圖網址，其他檔案改用 Drive 下載連結（都需要公開分享）
-  MAX_INLINE_BYTES: 5 * 1024 * 1024,
-  // 資料夾沒有首頁時，是否列出檔案清單
-  AUTO_INDEX: false,
   // 是否允許其他網站用 iframe 嵌入
   ALLOW_IFRAME_EMBED: false,
-  // 分頁圖示網址（HtmlService 只接受 http(s) 網址，留空則用 Google 預設）
+  // 分頁圖示網址（HtmlService 只接受 http(s) 網址）
   FAVICON_URL: '',
   DEFAULT_VIEWPORT: 'width=device-width, initial-scale=1',
+  // 自動建置的檢查間隔（分鐘，只能是 1、5、10、15、30），見 installBuildTrigger()
+  BUILD_TRIGGER_MINUTES: 10,
+
+  // 每個網站的預設設定，可以在網站根目錄放 site.json 覆寫其中任何欄位
+  SITE_DEFAULTS: {
+    indexFiles: ['index.html', 'index.htm'],
+    notFound: '404.html',
+    autoIndex: false,
+    // 圖片（png / jpeg / webp / bmp）：
+    //   'auto'   公開分享（知道連結的人可檢視）的用 Drive 縮圖網址，否則內嵌成 data URI
+    //   'drive'  一律用縮圖網址；'inline' 一律內嵌
+    // drive.google.com/uc?id=… 不能用在 <img>（瀏覽器會以 ERR_BLOCKED_BY_ORB 擋下），縮圖網址可以。
+    imageMode: 'auto',
+    thumbnailSize: 'w2000',
+    // 超過這個大小的檔案不轉 data URI（圖片改縮圖網址，其他改 Drive 下載連結）
+    maxInlineBytes: 5 * 1024 * 1024,
+    // esbuild 選項（Build.gs）
+    build: {
+      minify: true,
+      target: 'es2020',
+      sourcemap: false,
+      jsx: undefined, // 'automatic' 搭配 jsxImportSource 使用 React 17+ 的 JSX runtime
+      jsxImportSource: undefined,
+      define: {},
+    },
+    // npm 套件來源：import 'dayjs' → https://esm.sh/dayjs
+    cdn: 'https://esm.sh/',
+    // 指定套件版本或網址（類似 import map），鍵以 / 結尾代表前綴對應
+    imports: {},
+  },
 };
 
 const MIME_BY_EXT_ = {
@@ -53,14 +75,18 @@ const MIME_BY_EXT_ = {
   woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf', eot: 'application/vnd.ms-fontobject',
   mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', mp4: 'video/mp4', webm: 'video/webm',
   vtt: 'text/vtt', pdf: 'application/pdf', zip: 'application/zip',
+  ts: 'text/plain', tsx: 'text/plain', jsx: 'text/plain',
 };
 
+const SITE_CONFIG_FILE_ = 'site.json';
+const MANIFEST_FILE_ = '_build.json';
+const NEEDS_BUILD_RE_ = /\.(tsx?|jsx|mts|cts)$/i;
 const MAX_CACHE_CHUNKS_ = 40; // 每塊 90KB，約 3.6MB
 const CACHE_CHUNK_SIZE_ = 90000;
 const MAX_CSS_DEPTH_ = 5;
 
-// 一次請求內的暫存
-const memo_ = { baseUrl: undefined, cacheVersion: null, root: null, nodes: {} };
+// 一次執行內的暫存
+const memo_ = { baseUrl: undefined, props: null, sites: {} };
 
 // ---------------------------------------------------------------------------
 // 入口
@@ -71,68 +97,210 @@ function doGet(e) {
     return handleRequest_((e && e.pathInfo) || '');
   } catch (err) {
     console.error(err && err.stack ? err.stack : err);
-    return messagePage_('500', '伺服器錯誤', String((err && err.message) || err));
+    return messagePage_(null, '500', '伺服器錯誤', String((err && err.message) || err));
   }
 }
 
-/** 修改 Drive 內容後執行這個函式，讓所有快取立即失效。 */
+/** 讓所有網站的快取立即失效。 */
 function purgeCache() {
-  const props = PropertiesService.getScriptProperties();
-  const next = String(Number(props.getProperty('CACHE_VERSION') || '0') + 1);
-  props.setProperty('CACHE_VERSION', next);
-  console.log('快取已清除，CACHE_VERSION = ' + next);
+  setProp_('CACHE_VERSION', String(Date.now()));
+  console.log('已清除所有網站的快取');
 }
 
-/** 在編輯器執行，確認根目錄設定正確並列出首頁會載入的內容。 */
+/** 在編輯器執行，檢查設定並列出所有網站。 */
 function checkSetup() {
-  const root = getRootFolder_();
-  console.log('根目錄：' + root.getName() + ' (' + root.getId() + ')');
-  console.log('圖片模式：' + CONFIG.IMAGE_MODE + '，根目錄' +
-    (isPublic_(root) ? '已公開分享，圖片會使用 Drive 縮圖網址' : '未公開分享，' +
-      (CONFIG.IMAGE_MODE === 'drive' ? '警告：drive 模式下圖片會破圖' : '圖片會內嵌成 data URI')));
-  const node = resolvePath_('');
-  const index = CONFIG.INDEX_FILES.map((n) => findChild_(node.folder, n, 'file')).find(Boolean);
-  console.log(index ? '首頁：' + index.getName() : '警告：根目錄沒有 ' + CONFIG.INDEX_FILES.join(' / '));
+  const root = sitesRoot_();
+  console.log('網站資料夾：' + (root ? root.getName() + ' (' + root.getId() + ')' : '（未設定 SITES_FOLDER_ID）'));
+  const extra = explicitSites_();
+  if (Object.keys(extra).length) console.log('指令碼屬性 SITES：' + JSON.stringify(extra));
   console.log('Web App 網址：' + (getBaseUrl_() || '（尚未部署）'));
+  listSiteNames_().forEach((name) => {
+    const site = siteRef_(name);
+    const folder = siteFolder_(site);
+    if (!folder) return console.log('✗ ' + name + '：找不到資料夾');
+    const cfg = siteConfig_(site);
+    const index = cfg.indexFiles.map((n) => findChild_(folder, n, 'file')).find(Boolean);
+    const manifest = siteManifest_(site);
+    const built = manifest ? Object.keys(manifest.entries || {}).length + ' 個進入點，' + manifest.builtAt : '尚未建置';
+    console.log((index ? '✓ ' : '⚠ ') + name + '  ' + siteUrl_(site, '', true) +
+      '\n    首頁：' + (index ? index.getName() : '沒有 ' + cfg.indexFiles.join(' / ')) +
+      '\n    圖片：' + cfg.imageMode + (isPublic_(folder) ? '（資料夾已公開）' : '（資料夾未公開）') +
+      '\n    建置：' + built);
+  });
 }
 
 function handleRequest_(rawPath) {
-  const reqPath = normalizePath_(/%[0-9a-f]{2}/i.test(rawPath) ? safeDecode_(rawPath) : rawPath);
-  const cacheKey = 'page:' + reqPath;
-  const cached = cacheGetJson_(cacheKey);
-  if (cached) return htmlOutput_(cached);
-
-  const node = resolvePath_(reqPath);
-  if (!node) return notFound_(reqPath);
-
-  if (node.kind === 'folder') {
-    for (const name of CONFIG.INDEX_FILES) {
-      const file = findChild_(node.folder, name, 'file');
-      if (file) return renderAndCache_(file, joinPath_(reqPath, name), cacheKey);
-    }
-    if (CONFIG.AUTO_INDEX) return htmlOutput_(renderListing_(node.folder, reqPath));
-    return notFound_(reqPath);
+  const full = normalizePath_(/%[0-9a-f]{2}/i.test(rawPath) ? safeDecode_(rawPath) : rawPath);
+  if (!full) {
+    if (CONFIG.DEFAULT_SITE) return serveSite_(siteRef_(CONFIG.DEFAULT_SITE), '');
+    if (CONFIG.LIST_SITES) return htmlOutput_(renderSiteList_());
+    return messagePage_(null, '404', '找不到頁面', '/');
   }
-
-  if (isHtmlPath_(reqPath, node.file)) return renderAndCache_(node.file, reqPath, cacheKey);
-  return serveAsset_(node.file, reqPath);
+  const i = full.indexOf('/');
+  const name = i < 0 ? full : full.slice(0, i);
+  return serveSite_(siteRef_(name), i < 0 ? '' : full.slice(i + 1));
 }
 
-function renderAndCache_(file, filePath, cacheKey) {
-  const page = renderHtmlPage_(readText_(file), filePath);
-  cachePutJson_(cacheKey, page);
+function serveSite_(site, reqPath) {
+  const cacheKey = 'page:' + reqPath;
+  const cached = cacheGetJson_(site, cacheKey);
+  if (cached) return htmlOutput_(cached);
+
+  if (!siteFolder_(site)) return messagePage_(null, '404', '找不到網站', site.name);
+  if (isHiddenPath_(reqPath)) return notFound_(site, reqPath);
+
+  const cfg = siteConfig_(site);
+  const node = resolvePath_(site, reqPath);
+  if (!node) return notFound_(site, reqPath);
+
+  if (node.kind === 'folder') {
+    for (const name of cfg.indexFiles) {
+      const file = findChild_(node.folder, name, 'file');
+      if (file) return renderAndCache_(site, file, joinPath_(reqPath, name), cacheKey);
+    }
+    if (cfg.autoIndex) return htmlOutput_(renderListing_(site, node.folder, reqPath));
+    return notFound_(site, reqPath);
+  }
+
+  if (guessMime_(reqPath, node.file) === 'text/html') return renderAndCache_(site, node.file, reqPath, cacheKey);
+  return serveAsset_(site, node.file, reqPath);
+}
+
+function renderAndCache_(site, file, filePath, cacheKey) {
+  const page = renderHtmlPage_(site, readText_(file), filePath);
+  cachePutJson_(site, cacheKey, page);
   return htmlOutput_(page);
 }
 
-function notFound_(reqPath) {
-  const name = CONFIG.NOT_FOUND_PAGE;
+function notFound_(site, reqPath) {
+  const name = siteConfig_(site).notFound;
   if (name && reqPath !== name) {
-    const cached = cacheGetJson_('page:' + name);
+    const cached = cacheGetJson_(site, 'page:' + name);
     if (cached) return htmlOutput_(cached);
-    const file = findChild_(getRootFolder_(), name, 'file');
-    if (file) return renderAndCache_(file, name, 'page:' + name);
+    const file = findChild_(siteFolder_(site), name, 'file');
+    if (file) return renderAndCache_(site, file, name, 'page:' + name);
   }
-  return messagePage_('404', '找不到頁面', '/' + reqPath);
+  return messagePage_(site, '404', '找不到頁面', '/' + site.name + '/' + reqPath);
+}
+
+/** 設定檔、建置結果、以 . 開頭的檔案不對外提供 */
+function isHiddenPath_(path) {
+  return path === SITE_CONFIG_FILE_ || path === MANIFEST_FILE_ || path.split('/').some((s) => s.charAt(0) === '.');
+}
+
+// ---------------------------------------------------------------------------
+// 網站
+// ---------------------------------------------------------------------------
+
+/** 不碰 Drive 的網站參照；資料夾、設定、建置結果都在需要時才讀取。 */
+function siteRef_(name) {
+  if (!memo_.sites[name]) memo_.sites[name] = { name: name, nodes: {} };
+  return memo_.sites[name];
+}
+
+function sitesRoot_() {
+  if (memo_.sitesRoot === undefined) {
+    const id = props_().SITES_FOLDER_ID || CONFIG.SITES_FOLDER_ID;
+    memo_.sitesRoot = id ? DriveApp.getFolderById(id) : null;
+  }
+  return memo_.sitesRoot;
+}
+
+function explicitSites_() {
+  const raw = props_().SITES;
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn('指令碼屬性 SITES 不是合法的 JSON：' + err);
+    return {};
+  }
+}
+
+function listSiteNames_() {
+  const names = Object.keys(explicitSites_());
+  const root = sitesRoot_();
+  if (root) {
+    const it = root.getFolders();
+    while (it.hasNext()) {
+      const f = it.next();
+      const n = f.getName();
+      if (!f.isTrashed() && !/^[._]/.test(n) && names.indexOf(n) < 0) names.push(n);
+    }
+  }
+  return names.sort();
+}
+
+function siteFolder_(site) {
+  if (site.folder !== undefined) return site.folder;
+  let folder = null;
+  if (site.name && !/^[._]/.test(site.name)) {
+    try {
+      const explicitId = explicitSites_()[site.name];
+      const cached = explicitId ? null : cacheGet_(null, 'site:' + site.name);
+      if (explicitId) {
+        folder = DriveApp.getFolderById(explicitId);
+      } else if (cached) {
+        folder = cached === '-' ? null : DriveApp.getFolderById(cached);
+      } else {
+        const root = sitesRoot_();
+        folder = root ? findChild_(root, site.name, 'folder') : null;
+        cachePut_(null, 'site:' + site.name, folder ? folder.getId() : '-');
+      }
+      if (folder && folder.isTrashed()) folder = null;
+    } catch (err) {
+      folder = null;
+    }
+  }
+  site.folder = folder;
+  return folder;
+}
+
+function siteConfig_(site) {
+  if (!site.config) {
+    let custom = {};
+    const folder = siteFolder_(site);
+    const file = folder && findChild_(folder, SITE_CONFIG_FILE_, 'file');
+    if (file) {
+      try {
+        custom = JSON.parse(readText_(file));
+      } catch (err) {
+        console.warn(site.name + '/' + SITE_CONFIG_FILE_ + ' 格式錯誤：' + err);
+      }
+    }
+    const d = CONFIG.SITE_DEFAULTS;
+    site.config = Object.assign({}, d, custom, {
+      build: Object.assign({}, d.build, custom.build),
+      imports: Object.assign({}, d.imports, custom.imports),
+    });
+  }
+  return site.config;
+}
+
+/** esbuild 打包結果（Build.gs 寫入網站根目錄的 _build.json） */
+function siteManifest_(site) {
+  if (site.manifest === undefined) {
+    site.manifest = null;
+    const folder = siteFolder_(site);
+    const file = folder && findChild_(folder, MANIFEST_FILE_, 'file');
+    if (file) {
+      try {
+        site.manifest = JSON.parse(readText_(file));
+      } catch (err) {
+        console.warn(site.name + '/' + MANIFEST_FILE_ + ' 讀取失敗：' + err);
+      }
+    }
+  }
+  return site.manifest;
+}
+
+function builtEntry_(site, path) {
+  const m = siteManifest_(site);
+  return m && m.entries && m.entries[path] ? m.entries[path] : null;
+}
+
+function bumpSiteVersion_(name) {
+  setProp_('CACHE_VERSION:' + name, String(Date.now()));
 }
 
 // ---------------------------------------------------------------------------
@@ -149,12 +317,12 @@ function htmlOutput_(page) {
 }
 
 /** 直接請求非 HTML 檔案：文字檔用 ContentService，圖片與其他檔案用一個簡單頁面呈現。 */
-function serveAsset_(file, path) {
+function serveAsset_(site, file, path) {
   const mime = guessMime_(path, file);
   const name = file.getName();
 
   if (mime.indexOf('image/') === 0) {
-    const src = fileUri_(file, mime);
+    const src = fileUri_(site, file, mime);
     return htmlOutput_({
       title: name,
       html: '<base target="_top"><style>body{margin:0;display:grid;place-items:center;min-height:100vh;background:#111}' +
@@ -166,7 +334,7 @@ function serveAsset_(file, path) {
     return ContentService.createTextOutput(readText_(file)).setMimeType(contentServiceMime_(mime));
   }
 
-  const href = fileUri_(file, mime);
+  const href = fileUri_(site, file, mime);
   const isData = href.indexOf('data:') === 0;
   return htmlOutput_({
     title: name,
@@ -176,24 +344,35 @@ function serveAsset_(file, path) {
   });
 }
 
-function renderListing_(folder, reqPath) {
+function renderSiteList_() {
+  const items = listSiteNames_().map((n) =>
+    '<li><a href="' + escapeAttr_(siteUrl_(siteRef_(n), '', true)) + '">' + escapeHtml_(n) + '</a></li>');
+  return {
+    title: '網站列表',
+    html: '<base target="_top">' + pageStyle_() + '<main><h1>網站列表</h1>' +
+      (items.length ? '<ul>' + items.join('') + '</ul>' : '<p>還沒有任何網站。</p>') + '</main>',
+  };
+}
+
+function renderListing_(site, folder, reqPath) {
   const rows = [];
-  if (reqPath) rows.push({ name: '../', href: siteUrl_(dirname_(reqPath), true) });
+  if (reqPath) rows.push({ name: '../', href: siteUrl_(site, dirname_(reqPath), true) });
   const folders = [];
   const files = [];
   const fi = folder.getFolders();
   while (fi.hasNext()) {
     const f = fi.next();
-    if (!f.isTrashed()) folders.push(f.getName());
+    if (!f.isTrashed() && f.getName().charAt(0) !== '.') folders.push(f.getName());
   }
   const it = folder.getFiles();
   while (it.hasNext()) {
     const f = it.next();
-    if (!f.isTrashed()) files.push(f.getName());
+    const p = joinPath_(reqPath, f.getName());
+    if (!f.isTrashed() && !isHiddenPath_(p)) files.push(f.getName());
   }
-  folders.sort().forEach((n) => rows.push({ name: n + '/', href: siteUrl_(joinPath_(reqPath, n), true) }));
-  files.sort().forEach((n) => rows.push({ name: n, href: siteUrl_(joinPath_(reqPath, n), false) }));
-  const title = 'Index of /' + reqPath;
+  folders.sort().forEach((n) => rows.push({ name: n + '/', href: siteUrl_(site, joinPath_(reqPath, n), true) }));
+  files.sort().forEach((n) => rows.push({ name: n, href: siteUrl_(site, joinPath_(reqPath, n), false) }));
+  const title = 'Index of /' + site.name + '/' + reqPath;
   return {
     title: title,
     html: '<base target="_top">' + pageStyle_() + '<main><h1>' + escapeHtml_(title) + '</h1><ul>' +
@@ -202,11 +381,12 @@ function renderListing_(folder, reqPath) {
   };
 }
 
-function messagePage_(code, title, detail) {
+function messagePage_(site, code, title, detail) {
+  const home = site && siteFolder_(site) ? siteUrl_(site, '', true) : getBaseUrl_() || '/';
   return htmlOutput_({
     title: code + ' ' + title,
     html: '<base target="_top">' + pageStyle_() + '<main><h1>' + escapeHtml_(code + ' ' + title) + '</h1><p>' +
-      escapeHtml_(detail) + '</p><p><a href="' + escapeAttr_(siteUrl_('', true)) + '">回首頁</a></p></main>',
+      escapeHtml_(detail) + '</p><p><a href="' + escapeAttr_(home) + '">回首頁</a></p></main>',
   });
 }
 
@@ -227,7 +407,7 @@ const HTML_TOKEN_RE_ =
 
 const ATTR_RE_ = /([^\s"'>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
 
-// 這些屬性指向的檔案會轉成 data URI
+// 這些屬性指向的檔案會轉成 data URI / 縮圖網址
 const ASSET_ATTRS_ = {
   img: ['src'], source: ['src'], video: ['src', 'poster'], audio: ['src'], track: ['src'],
   embed: ['src'], input: ['src'], object: ['data'], image: ['href', 'xlink:href'],
@@ -236,12 +416,13 @@ const ASSET_ATTRS_ = {
 const PAGE_ATTRS_ = { a: ['href'], area: ['href'], form: ['action'], iframe: ['src'], frame: ['src'] };
 
 /**
+ * @param {Object} site
  * @param {string} html 原始 HTML
- * @param {string} pagePath 這個頁面在網站中的路徑，例如 "blog/post.html"
+ * @param {string} pagePath 頁面在網站中的路徑，例如 "blog/post.html"
  * @return {{title: string, viewport: string, html: string}}
  */
-function renderHtmlPage_(html, pagePath) {
-  const ctx = { pagePath: pagePath, baseDir: dirname_(pagePath), assets: {}, deferred: [] };
+function renderHtmlPage_(site, html, pagePath) {
+  const ctx = { site: site, pagePath: pagePath, baseDir: dirname_(pagePath), assets: {}, deferred: [] };
   let out = html.replace(HTML_TOKEN_RE_, (m, blockName, blockAttrs, body, tagName, tagAttrs) => {
     if (m.charAt(1) === '!') return m;
     if (blockName) {
@@ -253,7 +434,7 @@ function renderHtmlPage_(html, pagePath) {
     return rewriteTag_(m, parseTag_(tagName.toLowerCase(), tagAttrs), ctx);
   });
 
-  // defer 的外部 script 被內嵌後會失去 defer 效果，移到 </body> 前維持執行順序
+  // defer 的外部 script 內嵌後會失去 defer 效果，移到 </body> 前維持執行順序
   if (ctx.deferred.length) {
     const scripts = ctx.deferred.join('\n');
     const idx = out.search(/<\/body\s*>(?![\s\S]*<\/body\s*>)/i);
@@ -261,8 +442,8 @@ function renderHtmlPage_(html, pagePath) {
   }
 
   // 頁面在沙盒 iframe 內：連結預設跳出到最上層；並提供網站根網址給前端 JS 使用
-  const baseUrl = getBaseUrl_();
-  const inject = '<base target="_top">\n<script>window.SITE_BASE_URL=' + JSON.stringify(baseUrl).replace(/</g, '\\u003c') +
+  const inject = '<base target="_top">\n<script>window.SITE_BASE_URL=' +
+    JSON.stringify(siteUrl_(site, '', false)).replace(/</g, '\\u003c') +
     ';window.siteUrl=function(p){return window.SITE_BASE_URL+"/"+String(p||"").replace(/^\\/+/,"");};</script>\n';
   const head = out.match(/<head\b(?:[^>"']|"[^"]*"|'[^']*')*>/i);
   out = head ? out.slice(0, head.index + head[0].length) + '\n' + inject + out.slice(head.index + head[0].length) : inject + out;
@@ -274,19 +455,37 @@ function rewriteScript_(original, tag, ctx) {
   const src = getAttr_(tag, 'src');
   if (src == null || !isLocalRef_(src)) return original;
   const ref = resolveRef_(src, ctx.baseDir, ctx.pagePath);
-  const file = getFileByPath_(ref.path);
-  if (!file) return original;
 
-  const code = readText_(file).replace(/<\/script/gi, '<\\/script');
+  let code;
+  let css = '';
+  const built = builtEntry_(ctx.site, ref.path);
+  if (built) {
+    if (built.error) return consoleError_(ref.path + ' 建置失敗：\n' + built.error);
+    code = built.code;
+    css = built.css || '';
+  } else {
+    const file = getFileByPath_(ctx.site, ref.path);
+    if (!file) return original;
+    if (NEEDS_BUILD_RE_.test(ref.path)) return consoleError_(ref.path + ' 尚未建置，請在 Apps Script 執行 buildAll()');
+    code = readText_(file);
+  }
+
+  code = code.replace(/<\/script/gi, '<\\/script');
   const isModule = (getAttr_(tag, 'type') || '').toLowerCase() === 'module';
   const deferred = getAttr_(tag, 'defer') != null && !isModule;
   ['src', 'integrity', 'crossorigin', 'defer', 'async'].forEach((n) => removeAttr_(tag, n));
+  // JS 裡 import 的 CSS 由 esbuild 輸出成獨立的 CSS
+  const style = css ? '<style>\n' + rewriteCss_(css, dirname_(ref.path), ctx, 1).replace(/<\/style/gi, '<\\/style') + '\n</style>' : '';
   const out = buildTag_(tag) + code + '</script>';
   if (deferred) {
     ctx.deferred.push(out);
-    return '';
+    return style;
   }
-  return out;
+  return style + out;
+}
+
+function consoleError_(message) {
+  return '<script>console.error(' + JSON.stringify(message).replace(/</g, '\\u003c') + ');</script>';
 }
 
 function rewriteTag_(original, tag, ctx) {
@@ -331,9 +530,17 @@ function rewriteLink_(tag, ctx) {
   const ref = resolveRef_(href, ctx.baseDir, ctx.pagePath);
 
   if (rel.indexOf('stylesheet') >= 0) {
-    const file = getFileByPath_(ref.path);
-    if (!file) return null;
-    const css = rewriteCss_(readText_(file), dirname_(ref.path), ctx, 1).replace(/<\/style/gi, '<\\/style');
+    let css;
+    const built = builtEntry_(ctx.site, ref.path);
+    if (built) {
+      if (built.error) return consoleError_(ref.path + ' 建置失敗：\n' + built.error);
+      css = built.code;
+    } else {
+      const file = getFileByPath_(ctx.site, ref.path);
+      if (!file) return null;
+      css = readText_(file);
+    }
+    css = rewriteCss_(css, dirname_(ref.path), ctx, 1).replace(/<\/style/gi, '<\\/style');
     const media = getAttr_(tag, 'media');
     return '<style' + (media ? ' media="' + escapeAttr_(media) + '"' : '') + '>\n' + css + '\n</style>';
   }
@@ -367,14 +574,22 @@ function rewriteSrcset_(srcset, ctx) {
 function pageHref_(href, ctx) {
   if (!isLocalRef_(href)) return null;
   const ref = resolveRef_(href, ctx.baseDir, ctx.pagePath);
-  return siteUrl_(ref.path, ref.isDir) + ref.suffix;
+  // 相對路徑往上超出網站根目錄（例如 ../other-site/）就連到同一個部署的其他網站
+  const p = String(href).trim().replace(/[?#].*$/, '');
+  if (p && p.charAt(0) !== '/') {
+    const hostPath = normalizePath_(joinPath_(joinPath_(ctx.site.name, ctx.baseDir), p.split('/').map(safeDecode_).join('/')));
+    if (hostPath.split('/')[0] !== ctx.site.name) {
+      return getBaseUrl_() + (hostPath ? '/' + hostPath.split('/').map(encodeURIComponent).join('/') + (ref.isDir ? '/' : '') : '') + ref.suffix;
+    }
+  }
+  return siteUrl_(ctx.site, ref.path, ref.isDir) + ref.suffix;
 }
 
-/** 把網站內的檔案轉成可直接嵌入的網址（data URI 或 Drive 連結）。 */
+/** 把網站內的檔案轉成可直接嵌入的網址（data URI 或 Drive 縮圖網址）。 */
 function assetUri_(ref, ctx, depth) {
   const hash = ref.suffix.indexOf('#') >= 0 ? ref.suffix.slice(ref.suffix.indexOf('#')) : '';
   if (!(ref.path in ctx.assets)) {
-    const file = getFileByPath_(ref.path);
+    const file = getFileByPath_(ctx.site, ref.path);
     let uri = null;
     if (file) {
       const mime = guessMime_(ref.path, file);
@@ -382,7 +597,7 @@ function assetUri_(ref, ctx, depth) {
         const css = rewriteCss_(readText_(file), dirname_(ref.path), ctx, depth + 1);
         uri = 'data:text/css;charset=utf-8;base64,' + Utilities.base64Encode(css, Utilities.Charset.UTF_8);
       } else {
-        uri = fileUri_(file, mime);
+        uri = fileUri_(ctx.site, file, mime);
       }
     }
     ctx.assets[ref.path] = uri;
@@ -391,25 +606,26 @@ function assetUri_(ref, ctx, depth) {
   return uri ? uri + hash : null;
 }
 
-function fileUri_(file, mime) {
-  const isThumbnailable = THUMBNAIL_MIME_RE_.test(mime);
-  if (isThumbnailable && CONFIG.IMAGE_MODE !== 'inline' && (CONFIG.IMAGE_MODE === 'drive' || isPublic_(file))) {
-    return thumbnailUrl_(file);
+const THUMBNAIL_MIME_RE_ = /^image\/(png|jpeg|webp|bmp)$/;
+
+function fileUri_(site, file, mime) {
+  const cfg = siteConfig_(site);
+  const thumbnailable = THUMBNAIL_MIME_RE_.test(mime);
+  if (thumbnailable && cfg.imageMode !== 'inline' && (cfg.imageMode === 'drive' || isPublic_(file))) {
+    return thumbnailUrl_(file, cfg);
   }
-  if (file.getSize() > CONFIG.MAX_INLINE_BYTES) {
-    // uc 連結只適合當下載連結；被 <video>/<script> 等內嵌載入時可能會被瀏覽器擋下
-    return isThumbnailable
-      ? thumbnailUrl_(file)
+  if (file.getSize() > cfg.maxInlineBytes) {
+    // uc 連結只適合當下載連結；被 <img>/<video> 等內嵌載入時會被瀏覽器擋下
+    return thumbnailable
+      ? thumbnailUrl_(file, cfg)
       : 'https://drive.google.com/uc?export=download&id=' + encodeURIComponent(file.getId());
   }
   return 'data:' + mime + ';base64,' + Utilities.base64Encode(file.getBlob().getBytes());
 }
 
-const THUMBNAIL_MIME_RE_ = /^image\/(png|jpeg|webp|bmp)$/;
-
-function thumbnailUrl_(file) {
+function thumbnailUrl_(file, cfg) {
   return 'https://drive.google.com/thumbnail?id=' + encodeURIComponent(file.getId()) +
-    '&sz=' + encodeURIComponent(CONFIG.THUMBNAIL_SIZE);
+    '&sz=' + encodeURIComponent(cfg.thumbnailSize);
 }
 
 /** 匿名訪客能不能看到這個檔案（縮圖網址需要）。 */
@@ -490,7 +706,7 @@ function isLocalRef_(ref) {
 }
 
 /**
- * 解析相對路徑。"../css/a.css?v=1#x" 在 baseDir="blog" 時
+ * 解析相對路徑（/ 開頭代表網站根目錄）。"../css/a.css?v=1#x" 在 baseDir="blog" 時
  * → { path: "css/a.css", suffix: "?v=1#x", isDir: false }
  */
 function resolveRef_(ref, baseDir, pagePath) {
@@ -533,10 +749,10 @@ function safeDecode_(s) {
   }
 }
 
-function siteUrl_(path, isDir) {
-  const base = getBaseUrl_();
-  if (!path) return base + (base ? '' : '/');
-  return base + '/' + path.split('/').map(encodeURIComponent).join('/') + (isDir ? '/' : '');
+function siteUrl_(site, path, isDir) {
+  const root = getBaseUrl_() + '/' + encodeURIComponent(site.name);
+  if (!path) return root + (isDir ? '/' : '');
+  return root + '/' + path.split('/').map(encodeURIComponent).join('/') + (isDir ? '/' : '');
 }
 
 function getBaseUrl_() {
@@ -556,41 +772,29 @@ function getBaseUrl_() {
 // Drive
 // ---------------------------------------------------------------------------
 
-function getRootFolder_() {
-  if (!memo_.root) {
-    const id = PropertiesService.getScriptProperties().getProperty('ROOT_FOLDER_ID') || CONFIG.ROOT_FOLDER_ID;
-    if (!id) throw new Error('尚未設定 ROOT_FOLDER_ID（指令碼屬性或 CONFIG）');
-    memo_.root = DriveApp.getFolderById(id);
-  }
-  return memo_.root;
-}
-
-function getFileByPath_(path) {
-  const node = resolvePath_(path);
+function getFileByPath_(site, path) {
+  if (site.files) return site.files.get(path) || null; // 建置時已掃描過整個網站
+  const node = resolvePath_(site, path);
   return node && node.kind === 'file' ? node.file : null;
 }
 
-/** 路徑 → { kind: 'file', file } | { kind: 'folder', folder } | null，結果會快取 Drive ID。 */
-function resolvePath_(path) {
-  if (path in memo_.nodes) return memo_.nodes[path];
+/** 網站內的路徑 → { kind: 'file', file } | { kind: 'folder', folder } | null，Drive ID 會快取。 */
+function resolvePath_(site, path) {
+  if (path in site.nodes) return site.nodes[path];
   let node = null;
 
   if (!path) {
-    node = { kind: 'folder', folder: getRootFolder_() };
+    node = { kind: 'folder', folder: siteFolder_(site) };
   } else {
     const key = 'node:' + path;
-    const cached = cacheGet_(key);
-    if (cached === '-') {
-      node = null;
-    } else if (cached) {
-      node = loadNode_(cached);
-    }
+    const cached = cacheGet_(site, key);
+    if (cached && cached !== '-') node = loadNode_(cached);
     if (!cached || (cached !== '-' && !node)) {
-      node = walkPath_(path);
-      cachePut_(key, node ? (node.kind === 'file' ? 'f:' + node.file.getId() : 'd:' + node.folder.getId()) : '-');
+      node = walkPath_(siteFolder_(site), path);
+      cachePut_(site, key, node ? (node.kind === 'file' ? 'f:' + node.file.getId() : 'd:' + node.folder.getId()) : '-');
     }
   }
-  memo_.nodes[path] = node;
+  site.nodes[path] = node;
   return node;
 }
 
@@ -608,9 +812,9 @@ function loadNode_(cached) {
   }
 }
 
-function walkPath_(path) {
+function walkPath_(root, path) {
   const segs = path.split('/');
-  let folder = getRootFolder_();
+  let folder = root;
   for (let i = 0; i < segs.length; i++) {
     if (i === segs.length - 1) {
       const file = findChild_(folder, segs[i], 'file');
@@ -640,10 +844,6 @@ function guessMime_(path, file) {
   return (ext && MIME_BY_EXT_[ext.toLowerCase()]) || (file && file.getMimeType()) || 'application/octet-stream';
 }
 
-function isHtmlPath_(path, file) {
-  return guessMime_(path, file) === 'text/html';
-}
-
 function isTextMime_(mime) {
   return mime.indexOf('text/') === 0 || /json|javascript|xml/.test(mime);
 }
@@ -662,32 +862,42 @@ function contentServiceMime_(mime) {
 }
 
 // ---------------------------------------------------------------------------
-// 快取（CacheService 每個值上限 100KB：先 gzip 再分塊）
+// 指令碼屬性與快取（CacheService 每個值上限 100KB：先 gzip 再分塊）
 // ---------------------------------------------------------------------------
 
-function cacheKey_(key) {
-  if (memo_.cacheVersion == null) {
-    memo_.cacheVersion = PropertiesService.getScriptProperties().getProperty('CACHE_VERSION') || '0';
-  }
-  const raw = memo_.cacheVersion + '|' + getBaseUrl_() + '|' + key;
+function props_() {
+  if (!memo_.props) memo_.props = PropertiesService.getScriptProperties().getProperties();
+  return memo_.props;
+}
+
+function setProp_(key, value) {
+  PropertiesService.getScriptProperties().setProperty(key, value);
+  if (memo_.props) memo_.props[key] = value;
+}
+
+/** site 為 null 時是全域快取；否則鍵值包含該網站的版本，buildChanged() / purgeCache() 會換版本。 */
+function cacheKey_(site, key) {
+  const p = props_();
+  const version = (p.CACHE_VERSION || '0') + '.' + (site ? p['CACHE_VERSION:' + site.name] || '0' : '');
+  const raw = version + '|' + getBaseUrl_() + '|' + (site ? site.name : '') + '|' + key;
   return Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, raw, Utilities.Charset.UTF_8));
 }
 
-function cacheGet_(key) {
+function cacheGet_(site, key) {
   if (!(CONFIG.CACHE_SECONDS > 0)) return null;
-  return CacheService.getScriptCache().get(cacheKey_(key));
+  return CacheService.getScriptCache().get(cacheKey_(site, key));
 }
 
-function cachePut_(key, value) {
+function cachePut_(site, key, value) {
   if (!(CONFIG.CACHE_SECONDS > 0)) return;
-  CacheService.getScriptCache().put(cacheKey_(key), value, CONFIG.CACHE_SECONDS);
+  CacheService.getScriptCache().put(cacheKey_(site, key), value, CONFIG.CACHE_SECONDS);
 }
 
-function cacheGetJson_(key) {
+function cacheGetJson_(site, key) {
   if (!(CONFIG.CACHE_SECONDS > 0)) return null;
   try {
     const cache = CacheService.getScriptCache();
-    const k = cacheKey_(key);
+    const k = cacheKey_(site, key);
     const n = Number(cache.get(k));
     if (!n) return null;
     const keys = [];
@@ -706,14 +916,14 @@ function cacheGetJson_(key) {
   }
 }
 
-function cachePutJson_(key, obj) {
+function cachePutJson_(site, key, obj) {
   if (!(CONFIG.CACHE_SECONDS > 0)) return;
   try {
     const gz = Utilities.gzip(Utilities.newBlob('').setDataFromString(JSON.stringify(obj), 'UTF-8'));
     const b64 = Utilities.base64Encode(gz.getBytes());
     const n = Math.ceil(b64.length / CACHE_CHUNK_SIZE_);
     if (n > MAX_CACHE_CHUNKS_) return; // 太大就不快取
-    const k = cacheKey_(key);
+    const k = cacheKey_(site, key);
     const entries = {};
     for (let i = 0; i < n; i++) entries[k + '.' + i] = b64.substr(i * CACHE_CHUNK_SIZE_, CACHE_CHUNK_SIZE_);
     entries[k] = String(n);

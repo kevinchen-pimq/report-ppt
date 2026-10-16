@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node build.mjs example-site dist",
-    "watch": "node build.mjs example-site dist --watch"
+    "vendor": "node tools/vendor-esbuild.mjs",
+    "test": "node tools/test.mjs"
   },
   "devDependencies": {
-    "esbuild": "0.25.10"
+    "esbuild-wasm": "0.25.10"
   }
 }
