@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drive Static Site 範例</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="icon" href="img/logo.svg">
+  <script src="js/app.js" defer></script>
+</head>
+<body>
+  <header>
+    <img src="img/logo.svg" alt="logo" width="48" height="48">
+    <nav>
+      <a href="./">首頁</a>
+      <a href="about.html">關於</a>
+      <a href="blog/">部落格</a>
+      <a href="#features">功能</a>
+    </nav>
+  </header>
+  <main>
+    <h1>這個網站放在 Google Drive 上</h1>
+    <p>CSS、JavaScript、圖片都是從同一個 Drive 資料夾讀出來的。</p>
+    <section id="features" class="hero">
+      <h2>功能</h2>
+      <ul>
+        <li>相對路徑連結</li>
+        <li>CSS 與 JS 自動內嵌</li>
+        <li>圖片轉 data URI</li>
+      </ul>
+    </section>
+    <p id="clock"></p>
+  </main>
+</body>
+</html>

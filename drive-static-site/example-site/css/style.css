@@ -1,0 +1,9 @@
+:root { --accent: #1a73e8; --bg: #ffffff; --fg: #202124; }
+@media (prefers-color-scheme: dark) { :root { --accent: #8ab4f8; --bg: #1e1e1e; --fg: #e8eaed; } }
+* { box-sizing: border-box; }
+body { margin: 0; font: 16px/1.7 system-ui, "Noto Sans TC", sans-serif; background: var(--bg); color: var(--fg); }
+header { display: flex; align-items: center; gap: 16px; padding: 12px 16px; border-bottom: 1px solid #8884; }
+nav a { margin-right: 12px; color: var(--accent); text-decoration: none; }
+main { max-width: 760px; margin: 0 auto; padding: 24px 16px; }
+a { color: var(--accent); }
+.hero { padding: 16px 20px; border-radius: 12px; background: url("../img/pattern.svg") repeat, #8881; }
